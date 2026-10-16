@@ -82,6 +82,16 @@ export interface EntryRangeInput {
    */
   replaceAbsences?: boolean;
   /**
+   * Заменить отсутствие только в этих днях — уже, чем `replaceAbsences`.
+   *
+   * Путь правки одного отпуска: админ сменил ему вид и потянул «По» дальше —
+   * общий флаг срезал бы и соседний отпуск, о котором форма ничего не знает и
+   * о котором предпросмотр промолчит. Решение владельца (2026-10-16): из
+   * правки заменяется только правимая запись, остальные отсутствия в диапазоне
+   * пропускаются, как без флага. Дни собирает `absenceDaysOf`.
+   */
+  replaceAbsenceDays?: ReadonlySet<string>;
+  /**
    * Занятость по дням. Дня нет в карте — день свободен.
    *
    * Не список занятых дат: режиму перезаписи мало знать «занят», ему нужно
@@ -98,7 +108,8 @@ export interface EntryRangeInput {
 
 export function planEntryRange(input: EntryRangeInput): EntryRangePlan & { replacedAbsence: string[] } {
   const { from, to, category, includeWeekends, mode, occupied, calendar } = input;
-  const replace = input.replaceAbsences === true;
+  const replaceAll = input.replaceAbsences === true;
+  const replaceOn = (date: string) => replaceAll || (input.replaceAbsenceDays?.has(date) ?? false);
   if (to < from) return { days: [], rewritten: [], replacedAbsence: [], skipped: [] };
   if (isAbsence(category)) return { days: [from], rewritten: [], replacedAbsence: [], skipped: [] };
 
@@ -117,6 +128,7 @@ export function planEntryRange(input: EntryRangeInput): EntryRangePlan & { repla
     else if (!includeWeekends && isDayOff(date, calendar)) skipped.push({ date, reason: "weekend" });
     else {
       const busy = occupied?.[date];
+      const replace = replaceOn(date);
       if (!busy) days.push(date);
       else if (busy === "absence" && replace) {
         // Режим тут не важен: в дне нет работы, которую расстановка берегла бы.
@@ -187,6 +199,20 @@ export function entryRangeOccupancy<T extends { date: string; endDate?: string |
 }
 
 /**
+ * Дни, где единственное отсутствие — именно эта запись: что заменит правка
+ * одного отпуска (`replaceAbsenceDays`).
+ *
+ * По id, а не по датам правимой записи: отсутствие, к которому в дне
+ * приложено второе, уже двусмысленно, и такой день пропускается так же, как у
+ * общей замены, — иначе правка одного отпуска молча резала бы и соседний.
+ */
+export function absenceDaysOf<T extends { id: number }>(occupancy: EntryRangeOccupancy<T>, entryId: number): Set<string> {
+  const days = new Set<string>();
+  for (const [day, row] of occupancy.absence) if (row.id === entryId) days.add(day);
+  return days;
+}
+
+/**
  * Что остаётся от полосы, если вырезать из неё дни, — подряд идущими кусками.
  *
  * Кусков бывает два и больше: отпуск 12–17, из которого вырезана пятница, — это
@@ -228,7 +254,10 @@ export function cutDaysFromSpan(
 export function entryRangeHint(mode: EntryRangeMode, replaceAbsences = false): string {
   // С заменой — другая фраза целиком, а не приписка: «останутся на месте» про
   // отпуск соврало бы ровно перед необратимым нажатием.
-  const yields = "отпуск, больничный и командировка уступят место новой записи там, где она встанет.";
+  // «Любые» и «в выбранных днях» — не украшение: переключатель общий, и он
+  // снесёт и тот отпуск, которого админ на неделе не видит (линза «не обещать
+  // лишнего»: подсказка не должна звучать как «только тот, что на экране»).
+  const yields = "любые отпуск, больничный и командировка в выбранных днях уступят место новой записи там, где она встанет.";
   if (replaceAbsences) {
     return mode === "rewrite"
       ? `Смены и дежурства в этих днях перепишутся, а ${yields}`
@@ -247,7 +276,9 @@ export function entryRangeHint(mode: EntryRangeMode, replaceAbsences = false): s
  * галочки, и дни за пределами «С/По»: отпуск режется ровно по новой записи.
  */
 export function absenceReplaceHint(absence: EntryCategory): string {
-  return `${categoryLabel(absence)} в эти дни заменится новой записью и останется только там, куда она не встанет.`;
+  // Вторая фраза — потому что сервер заменяет только правимую запись: соседний
+  // отпуск, на который заехали «По», останется, и день с ним пропустится.
+  return `${categoryLabel(absence)} в эти дни заменится новой записью и останется только там, куда она не встанет. Другие отсутствия в этих днях останутся на месте.`;
 }
 
 /** «Поставлено 18 · 4 перепишутся · пропущено 4: 2 выходных, 2 уже заняты» — итог одной строкой. */

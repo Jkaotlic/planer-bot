@@ -8,6 +8,7 @@ import {
   entryRangeHint,
   entryRangeOccupancy,
   planEntryRange,
+  absenceDaysOf,
 } from "./entry-range";
 import { EMPTY_CALENDAR, calendarFrom } from "./calendar";
 
@@ -393,6 +394,53 @@ describe("planEntryRange с заменой отсутствия", () => {
   });
 });
 
+/**
+ * Замена ОДНОГО отсутствия — путь правки (проверка ветки, 2026-10-16). Админ
+ * правит отпуск 12–17 в «День» и тянет «По» до 24-го: общий флаг срезал бы и
+ * отпуск 20–25, о котором форма молчит. Решение владельца: из правки заменяется
+ * только правимая запись, остальные отсутствия пропускаются как без флага.
+ */
+describe("planEntryRange с заменой только названных дней", () => {
+  const twoVacations = {
+    "2026-10-12": "absence", "2026-10-13": "absence", "2026-10-14": "absence",
+    "2026-10-15": "absence", "2026-10-16": "absence", "2026-10-17": "absence",
+    "2026-10-20": "absence", "2026-10-21": "absence", "2026-10-22": "absence",
+    "2026-10-23": "absence", "2026-10-24": "absence", "2026-10-25": "absence",
+  } as const;
+
+  it("заменяет отсутствие только в названных днях, остальное — пропуск по отсутствию", () => {
+    const plan = planEntryRange({
+      from: "2026-10-12", to: "2026-10-24", category: "shift", includeWeekends: false, mode: "rewrite",
+      replaceAbsenceDays: new Set(["2026-10-12", "2026-10-13", "2026-10-14", "2026-10-15", "2026-10-16", "2026-10-17"]),
+      occupied: twoVacations, calendar: EMPTY_CALENDAR,
+    });
+    expect(plan.replacedAbsence).toEqual(["2026-10-12", "2026-10-13", "2026-10-14", "2026-10-15", "2026-10-16"]);
+    // 19-е свободно — смена встаёт; 20–23 — второй отпуск, его не трогают.
+    expect(plan.days).toEqual(["2026-10-12", "2026-10-13", "2026-10-14", "2026-10-15", "2026-10-16", "2026-10-19"]);
+    expect(plan.skipped.filter((s) => s.reason === "absence").map((s) => s.date))
+      .toEqual(["2026-10-20", "2026-10-21", "2026-10-22", "2026-10-23"]);
+  });
+
+  it("день «отсутствие и смена» вне названных — пропуск по отсутствию", () => {
+    const plan = planEntryRange({
+      from: "2026-10-12", to: "2026-10-12", category: "duty", includeWeekends: false, mode: "rewrite",
+      replaceAbsenceDays: new Set(["2026-10-13"]),
+      occupied: { "2026-10-12": "absence_and_work" }, calendar: EMPTY_CALENDAR,
+    });
+    expect(plan.skipped).toEqual([{ date: "2026-10-12", reason: "absence" }]);
+  });
+
+  it("дни отсутствия по id — только те, где именно эта запись единственная", () => {
+    const first = { id: 1, date: "2026-10-12", endDate: "2026-10-14", category: "vacation" as const };
+    const second = { id: 2, date: "2026-10-14", endDate: "2026-10-15", category: "sick_leave" as const };
+    const occupancy = entryRangeOccupancy([first, second]);
+    // 14-е — два отсутствия, день двусмысленный, и «чей» он, сказать нельзя.
+    expect(absenceDaysOf(occupancy, 1)).toEqual(new Set(["2026-10-12", "2026-10-13"]));
+    expect(absenceDaysOf(occupancy, 2)).toEqual(new Set(["2026-10-15"]));
+    expect(absenceDaysOf(occupancy, 99)).toEqual(new Set());
+  });
+});
+
 describe("entryRangeOccupancy", () => {
   it("называет день по тому, что в нём стоит, и помнит, какая запись", () => {
     const vacation = { id: 1, date: "2026-10-12", endDate: "2026-10-14", category: "vacation" as const };
@@ -475,12 +523,12 @@ describe("подсказки с заменой отсутствия", () => {
   it("перезапись с флагом не обещает, что отпуск останется", () => {
     const text = entryRangeHint("rewrite", true);
     expect(text).not.toContain("останутся на месте");
-    expect(text).toBe("Смены и дежурства в этих днях перепишутся, а отпуск, больничный и командировка уступят место новой записи там, где она встанет.");
+    expect(text).toBe("Смены и дежурства в этих днях перепишутся, а любые отпуск, больничный и командировка в выбранных днях уступят место новой записи там, где она встанет.");
   });
 
   it("расстановка с флагом говорит, что занятые работой дни пропустятся", () => {
     expect(entryRangeHint("fill", true)).toBe(
-      "Дни со сменой или дежурством пропустятся, а отпуск, больничный и командировка уступят место новой записи там, где она встанет.",
+      "Дни со сменой или дежурством пропустятся, а любые отпуск, больничный и командировка в выбранных днях уступят место новой записи там, где она встанет.",
     );
   });
 
@@ -490,7 +538,11 @@ describe("подсказки с заменой отсутствия", () => {
   });
 
   it("правка отсутствия называет его по имени", () => {
-    expect(absenceReplaceHint("vacation")).toBe("Отпуск в эти дни заменится новой записью и останется только там, куда она не встанет.");
-    expect(absenceReplaceHint("business_trip")).toBe("Командировка в эти дни заменится новой записью и останется только там, куда она не встанет.");
+    expect(absenceReplaceHint("vacation")).toBe(
+      "Отпуск в эти дни заменится новой записью и останется только там, куда она не встанет. Другие отсутствия в этих днях останутся на месте.",
+    );
+    expect(absenceReplaceHint("business_trip")).toBe(
+      "Командировка в эти дни заменится новой записью и останется только там, куда она не встанет. Другие отсутствия в этих днях останутся на месте.",
+    );
   });
 });
