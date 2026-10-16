@@ -220,3 +220,82 @@ describe("an admin changes or removes a sick leave that has a live fan-out", () 
     expect(getShift(db, work.id)!.employeeId).toBe(anya.id);
   });
 });
+
+/**
+ * Замена больничного рабочей записью из диапазона (`replaceAbsences`). Побочки
+ * обязаны быть теми же, что у правки и удаления больничного админом: выпавшие
+ * дни теряют передачу сразу и с админским «отбоем», письма админам закрываются
+ * или перерисовываются, а не остаются с живыми кнопками.
+ */
+describe("an admin replaces sick days with work through the range", () => {
+  const replace = (app: ReturnType<typeof createApp>, token: string, employeeId: number, date: string) =>
+    app.request(new Request("http://x/api/admin/entries/range", authed(token, {
+      employeeId, from: date, to: date, category: "duty", start: "10:00", end: "19:00",
+      mode: "rewrite", replaceAbsences: true, includeWeekends: true,
+    })));
+
+  it("a replaced day loses its fan-out with the admin text; the day after keeps its own", async () => {
+    const { db, app, sent, sick, work, handover, anya, igorToken } = await scene({ pending: false });
+    db.update(shiftsTable).set({ endDate: day(2) }).where(eq(shiftsTable.id, sick.id)).run();
+    const work2 = createShift(db, { date: day(2), start: "09:00", end: "18:00", category: "shift", title: "День", employeeId: anya.id });
+    const handover2 = createHandover(db, { shiftId: work2.id, fromEmployeeId: anya.id, sickEntryId: sick.id, status: "fanned", escalatedAt: new Date() });
+    const res = await replace(app, igorToken, anya.id, day(1));
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    // Своя смена под больничным переписана на месте, а не задублирована.
+    expect(body.updated.map((e: { id: number }) => e.id)).toEqual([work.id]);
+    expect(getShift(db, work.id)).toMatchObject({ category: "duty", start: "10:00", employeeId: anya.id });
+
+    expect(getShift(db, sick.id)).toMatchObject({ date: day(2), endDate: null, category: "sick_leave" });
+    expect(getHandover(db, handover.id)!.status).toBe("cancelled");
+    expect(getHandover(db, handover2.id)!.status).toBe("fanned");
+    expectAdminCancelText(sent);
+    expect(sent.filter((m) => m.to === 403)).toHaveLength(1);
+  });
+
+  it("split in the middle: the fan-out of the later piece moves onto the new row instead of dying", async () => {
+    const { db, app, sick, anya, igorToken } = await scene({ pending: false });
+    db.update(shiftsTable).set({ endDate: day(3) }).where(eq(shiftsTable.id, sick.id)).run();
+    const work3 = createShift(db, { date: day(3), start: "09:00", end: "18:00", category: "shift", title: "День", employeeId: anya.id });
+    const handover3 = createHandover(db, { shiftId: work3.id, fromEmployeeId: anya.id, sickEntryId: sick.id, status: "fanned", escalatedAt: new Date() });
+
+    expect((await replace(app, igorToken, anya.id, day(2))).status).toBe(201);
+
+    expect(getShift(db, sick.id)).toMatchObject({ date: day(1), endDate: null });
+    const after = getHandover(db, handover3.id)!;
+    expect(after.status).toBe("fanned");
+    expect(after.sickEntryId).not.toBe(sick.id);
+    expect(getShift(db, after.sickEntryId!)).toMatchObject({ date: day(3), endDate: null, category: "sick_leave" });
+  });
+
+  it("a PENDING one-day sick leave replaced whole: the row is gone, the admins' buttons are closed, the fan-out is off", async () => {
+    const { db, app, sent, edits, sick, handover, anya, igorToken } = await scene({ pending: true });
+    addApprovalMessage(db, sick.id, 402, 77);
+
+    expect((await replace(app, igorToken, anya.id, day(1))).status).toBe(201);
+
+    expect(getShift(db, sick.id)).toBeUndefined();
+    expect(edits.map((e) => e.chat)).toEqual([402]);
+    expect(edits[0]!.text).toContain("Больничного уже нет");
+    expect(getHandover(db, handover.id)!.status).toBe("cancelled");
+    expectAdminCancelText(sent);
+  });
+
+  it("a PENDING sick leave split in the middle: the first piece's letter is redrawn, the second piece asks for its own ОК", async () => {
+    const { db, app, sent, edits, sick, anya, igorToken } = await scene({ pending: true });
+    db.update(shiftsTable).set({ endDate: day(3) }).where(eq(shiftsTable.id, sick.id)).run();
+    addApprovalMessage(db, sick.id, 402, 77);
+
+    expect((await replace(app, igorToken, anya.id, day(2))).status).toBe(201);
+
+    expect(getShift(db, sick.id)).toMatchObject({ date: day(1), endDate: null });
+    expect(getShift(db, sick.id)!.approvalRequestedAt).not.toBeNull();
+    // Перерисовка, а не второе письмо про ту же заявку.
+    expect(edits.filter((e) => e.chat === 402)).toHaveLength(1);
+    const piece = db.select().from(shiftsTable).where(eq(shiftsTable.date, day(3))).all().find((r) => r.category === "sick_leave")!;
+    expect(piece.approvalRequestedAt).not.toBeNull();
+    // Кнопки второго куска — свои: решение по первому не должно решать и его.
+    expect(sent.filter((m) => m.to === 402)).toHaveLength(1);
+  });
+});
+

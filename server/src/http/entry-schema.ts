@@ -207,6 +207,12 @@ export const rangeEntrySchema = z
      * кончиться эта ручка, и цена ошибки здесь несимметрична.
      */
     mode: z.enum(["fill", "rewrite"]).default("fill"),
+    /**
+     * Заменить отпуск, больничный и командировку в днях, где встанет запись.
+     * Умолчание «нет» по той же несимметричной цене, что у `mode`: тело без поля
+     * шлют выкаченные консоли, и молча снести им отпуск — худший исход ручки.
+     */
+    replaceAbsences: z.boolean().default(false),
   })
   .superRefine((v, ctx) => {
     const err = entryTimesError(v);

@@ -511,3 +511,220 @@ describe("POST /api/admin/entries/range · mode=rewrite", () => {
     expect(sent.filter((m) => m.text.includes("Обмен неактуален"))).toHaveLength(0);
   });
 });
+
+/**
+ * Явная замена отсутствия (прод, 2026-10-16): админ открыл свой отпуск 12–17,
+ * сохранил его сменой «День» — и перезапись пропустила все шесть дней, ничего
+ * не поменяв. Флаг `replaceAbsences` режет отсутствие ровно по дням, где встаёт
+ * рабочая запись; без флага — как было.
+ */
+describe("POST /api/admin/entries/range · replaceAbsences", () => {
+  // 2026-10-12 — понедельник, 17-е — суббота.
+  const vacationOf = (db: ReturnType<typeof makeTestDb>, employeeId: number) =>
+    listShiftsInRange(db, "2026-10-01", "2026-10-31")
+      .filter((r) => r.employeeId === employeeId && r.category === "vacation")
+      .map((r) => ({ date: r.date, endDate: r.endDate }));
+
+  it("один день посреди отпуска: смена встаёт, отпуск делится на до и после", async () => {
+    const db = makeTestDb();
+    const anya = createEmployee(db, { displayName: "Аня" });
+    const otpusk = createShift(db, { date: "2026-10-12", endDate: "2026-10-17", employeeId: anya.id, category: "vacation", note: "море" });
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+
+    const res = await app.request("/api/admin/entries/range", authedJson(admin, {
+      employeeId: anya.id, from: "2026-10-16", to: "2026-10-16", category: "shift", start: "09:00", end: "18:00",
+      title: "День", mode: "rewrite", replaceAbsences: true,
+    }));
+
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.created).toHaveLength(1);
+    expect(body.created[0]).toMatchObject({ date: "2026-10-16", category: "shift", start: "09:00", end: "18:00" });
+    expect(body.skipped).toEqual([]);
+    expect(body.replacedAbsence).toEqual(["2026-10-16"]);
+    // Первый кусок — та же строка (её id держат журнал и передачи), второй — новая.
+    expect(getShift(db, otpusk.id)).toMatchObject({ date: "2026-10-12", endDate: "2026-10-15", category: "vacation" });
+    expect(vacationOf(db, anya.id)).toEqual([
+      { date: "2026-10-12", endDate: "2026-10-15" },
+      { date: "2026-10-17", endDate: null },
+    ]);
+    // Кусок — тот же отпуск, а не голая строка: заметка уезжает с ним.
+    const tail = listShiftsInRange(db, "2026-10-17", "2026-10-17").find((r) => r.category === "vacation")!;
+    expect(tail.note).toBe("море");
+  });
+
+  it("без флага отпуск остаётся, а день пропущен — как раньше", async () => {
+    const db = makeTestDb();
+    const anya = createEmployee(db, { displayName: "Аня" });
+    createShift(db, { date: "2026-10-12", endDate: "2026-10-17", employeeId: anya.id, category: "vacation" });
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+
+    const body = await (await app.request("/api/admin/entries/range", authedJson(admin, {
+      employeeId: anya.id, from: "2026-10-16", to: "2026-10-16", category: "shift", start: "09:00", end: "18:00", mode: "rewrite",
+    }))).json();
+
+    expect(body.created).toEqual([]);
+    expect(body.skipped).toEqual([{ date: "2026-10-16", reason: "absence" }]);
+    expect(vacationOf(db, anya.id)).toEqual([{ date: "2026-10-12", endDate: "2026-10-17" }]);
+  });
+
+  it("весь отпуск на неделе: будни заменены, суббота без галочки осталась отпуском", async () => {
+    const db = makeTestDb();
+    const anya = createEmployee(db, { displayName: "Аня" });
+    const otpusk = createShift(db, { date: "2026-10-12", endDate: "2026-10-17", employeeId: anya.id, category: "vacation" });
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+
+    const body = await (await app.request("/api/admin/entries/range", authedJson(admin, {
+      employeeId: anya.id, from: "2026-10-12", to: "2026-10-17", category: "shift", start: "09:00", end: "18:00",
+      mode: "rewrite", replaceAbsences: true,
+    }))).json();
+
+    expect(body.created).toHaveLength(5);
+    expect(body.skipped).toEqual([{ date: "2026-10-17", reason: "weekend" }]);
+    expect(getShift(db, otpusk.id)).toMatchObject({ date: "2026-10-17", endDate: null });
+  });
+
+  it("отпуск целиком внутри диапазона удаляется", async () => {
+    const db = makeTestDb();
+    const anya = createEmployee(db, { displayName: "Аня" });
+    const otpusk = createShift(db, { date: "2026-10-13", endDate: "2026-10-14", employeeId: anya.id, category: "vacation" });
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+
+    const body = await (await app.request("/api/admin/entries/range", authedJson(admin, {
+      employeeId: anya.id, from: "2026-10-12", to: "2026-10-16", category: "shift", start: "09:00", end: "18:00",
+      mode: "fill", replaceAbsences: true,
+    }))).json();
+
+    expect(body.created).toHaveLength(5);
+    expect(getShift(db, otpusk.id)).toBeUndefined();
+    expect(vacationOf(db, anya.id)).toEqual([]);
+  });
+
+  it("журнал: строка диапазона с числом заменённых дней и правка самого отпуска", async () => {
+    const db = makeTestDb();
+    const anya = createEmployee(db, { displayName: "Аня" });
+    createShift(db, { date: "2026-10-12", endDate: "2026-10-17", employeeId: anya.id, category: "vacation" });
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+
+    await app.request("/api/admin/entries/range", authedJson(admin, {
+      employeeId: anya.id, from: "2026-10-16", to: "2026-10-16", category: "shift", start: "09:00", end: "18:00",
+      mode: "rewrite", replaceAbsences: true,
+    }));
+
+    const events = listRecentAudit(db, 20);
+    const range = events.find((e) => e.type === "entries_range_rewritten")!;
+    expect(range.payload).toMatchObject({ created: 1, updated: 0, skipped: 0, absenceDaysReplaced: 1 });
+    const updated = events.find((e) => e.type === "entry_updated")!;
+    expect(updated.payload).toMatchObject({
+      before: { date: "2026-10-12", endDate: "2026-10-17", category: "vacation" },
+      after: { date: "2026-10-12", endDate: "2026-10-15", category: "vacation" },
+    });
+    expect(events.find((e) => e.type === "entry_created")?.payload).toMatchObject({ date: "2026-10-17", category: "vacation" });
+  });
+
+  it("журнал: удалённый целиком отпуск записан удалением", async () => {
+    const db = makeTestDb();
+    const anya = createEmployee(db, { displayName: "Аня" });
+    createShift(db, { date: "2026-10-13", endDate: null, employeeId: anya.id, category: "business_trip" });
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+
+    await app.request("/api/admin/entries/range", authedJson(admin, {
+      employeeId: anya.id, from: "2026-10-13", to: "2026-10-13", category: "shift", start: "09:00", end: "18:00",
+      mode: "rewrite", replaceAbsences: true,
+    }));
+
+    expect(listRecentAudit(db, 20).find((e) => e.type === "entry_deleted")?.payload).toMatchObject({ category: "business_trip" });
+  });
+
+  it("работнику пишет письмо и про смену, и про отпуск — одно на всё", async () => {
+    vi.useFakeTimers();
+    try {
+      const db = makeTestDb();
+      const anya = createEmployee(db, { displayName: "Аня", inviteToken: "inv-anya-v" });
+      linkTelegramAccount(db, "inv-anya-v", 556);
+      createShift(db, { date: "2099-01-05", endDate: "2099-01-09", employeeId: anya.id, category: "vacation" });
+      const { bot, sent } = fakeBot();
+      const app = createApp({ db, config, bot });
+      const admin = await tokenFor(app, 111);
+
+      const res = await app.request("/api/admin/entries/range", authedJson(admin, {
+        employeeId: anya.id, from: "2099-01-07", to: "2099-01-07", category: "shift", start: "09:00", end: "18:00",
+        mode: "rewrite", replaceAbsences: true,
+      }));
+      expect((await res.json()).notified).toEqual({ delivered: 1, intended: 1 });
+
+      await vi.advanceTimersByTimeAsync(NOTICE_WINDOW_MS + 100);
+      const letters = sent.filter((m) => m.to === 556);
+      expect(letters).toHaveLength(1);
+      // Письмо называет и новую смену, и что стало с отпуском, — иначе человек
+      // не узнал бы, что отпуска в среду больше нет.
+      expect(letters[0]!.text).toContain("Ср 7 янв · 09:00–18:00 · Смена");
+      expect(letters[0]!.text).toContain("Пн 5 янв – Вт 6 янв · весь день · Отпуск");
+      expect(letters[0]!.text).toContain("Чт 8 янв – Пт 9 янв · весь день · Отпуск");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("отпуск, ушедший целиком, тоже назван в письме работнику", async () => {
+    vi.useFakeTimers();
+    try {
+      const db = makeTestDb();
+      const anya = createEmployee(db, { displayName: "Аня", inviteToken: "inv-anya-w" });
+      linkTelegramAccount(db, "inv-anya-w", 557);
+      createShift(db, { date: "2099-01-07", employeeId: anya.id, category: "vacation" });
+      const { bot, sent } = fakeBot();
+      const app = createApp({ db, config, bot });
+      const admin = await tokenFor(app, 111);
+
+      await app.request("/api/admin/entries/range", authedJson(admin, {
+        employeeId: anya.id, from: "2099-01-07", to: "2099-01-07", category: "shift", start: "09:00", end: "18:00",
+        mode: "rewrite", replaceAbsences: true,
+      }));
+
+      await vi.advanceTimersByTimeAsync(NOTICE_WINDOW_MS + 100);
+      const letters = sent.filter((m) => m.to === 557);
+      expect(letters).toHaveLength(1);
+      expect(letters[0]!.text).toContain("Отпуск");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("работнику ручка недоступна и с флагом", async () => {
+    const db = makeTestDb();
+    const igor = createEmployee(db, { displayName: "Игорь", inviteToken: "inv-334" });
+    linkTelegramAccount(db, "inv-334", 334);
+    const otpusk = createShift(db, { date: "2026-10-12", endDate: "2026-10-17", employeeId: igor.id, category: "vacation" });
+    const app = createApp({ db, config });
+    const worker = await tokenFor(app, 334);
+
+    const res = await app.request("/api/admin/entries/range", authedJson(worker, {
+      employeeId: igor.id, from: "2026-10-16", to: "2026-10-16", category: "shift", start: "09:00", end: "18:00",
+      mode: "rewrite", replaceAbsences: true,
+    }));
+    expect(res.status).toBe(403);
+    expect(getShift(db, otpusk.id)).toMatchObject({ date: "2026-10-12", endDate: "2026-10-17" });
+  });
+
+  it("чужой отпуск в тех же днях не трогает", async () => {
+    const db = makeTestDb();
+    const anya = createEmployee(db, { displayName: "Аня" });
+    const mark = createEmployee(db, { displayName: "Марк" });
+    createShift(db, { date: "2026-10-12", endDate: "2026-10-17", employeeId: mark.id, category: "vacation" });
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+
+    await app.request("/api/admin/entries/range", authedJson(admin, {
+      employeeId: anya.id, from: "2026-10-16", to: "2026-10-16", category: "shift", start: "09:00", end: "18:00",
+      mode: "rewrite", replaceAbsences: true,
+    }));
+    expect(vacationOf(db, mark.id)).toEqual([{ date: "2026-10-12", endDate: "2026-10-17" }]);
+  });
+});
