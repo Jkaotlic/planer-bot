@@ -297,5 +297,25 @@ describe("an admin replaces sick days with work through the range", () => {
     // Кнопки второго куска — свои: решение по первому не должно решать и его.
     expect(sent.filter((m) => m.to === 402)).toHaveLength(1);
   });
+
+  // Путь `wholly` в cutAbsenceDb: заявка ждёт «ОК» только на раздвинутый назад
+  // день, а 2–4 уже одобрены. Вырезан 2-й — второй кусок 3–4 весь из одобренных
+  // дней, спрашивать про него нечего: ни своей заявки, ни письма с кнопками.
+  it("a PENDING sick leave split so the second piece lies wholly in approved days: no request for that piece", async () => {
+    const { db, app, sent, sick, anya, igorToken } = await scene({ pending: true });
+    db.update(shiftsTable)
+      .set({ endDate: day(4), approvedDate: day(2), approvedEndDate: day(4) })
+      .where(eq(shiftsTable.id, sick.id)).run();
+    addApprovalMessage(db, sick.id, 402, 77);
+
+    expect((await replace(app, igorToken, anya.id, day(2))).status).toBe(201);
+
+    expect(getShift(db, sick.id)).toMatchObject({ date: day(1), endDate: null });
+    expect(getShift(db, sick.id)!.approvalRequestedAt).not.toBeNull();
+    const piece = db.select().from(shiftsTable).where(eq(shiftsTable.date, day(3))).all().find((r) => r.category === "sick_leave")!;
+    expect(piece).toMatchObject({ endDate: day(4), approvalRequestedAt: null, approvedDate: null, approvedEndDate: null });
+    // Первый кусок перерисован на месте, а второй новой заявки не родил.
+    expect(sent.filter((m) => m.to === 402)).toHaveLength(0);
+  });
 });
 
