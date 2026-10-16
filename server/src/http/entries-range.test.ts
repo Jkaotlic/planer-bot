@@ -811,3 +811,29 @@ describe("POST /api/admin/entries/range · replaceAbsenceEntryId", () => {
     expect(res.status).toBe(400);
   });
 });
+
+/**
+ * Сценарий владельца из прода (2026-10-16) — ровно тем путём, каким его теперь шлёт форма
+ * правки: отпуск 12–17, вид «День», «С/По» 16..16, `replaceAbsenceEntryId`.
+ */
+describe("POST /api/admin/entries/range · пятница посреди своего отпуска", () => {
+  it("отпуск 12–15 и 17, смена 16", async () => {
+    const db = makeTestDb();
+    const anya = createEmployee(db, { displayName: "Аня" });
+    const vacation = createShift(db, { date: "2026-10-12", endDate: "2026-10-17", employeeId: anya.id, category: "vacation", note: "море" });
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+
+    const res = await app.request("/api/admin/entries/range", authedJson(admin, {
+      employeeId: anya.id, from: "2026-10-16", to: "2026-10-16", category: "shift", start: "09:00", end: "18:00",
+      mode: "rewrite", replaceAbsenceEntryId: vacation.id,
+    }));
+    expect(res.status).toBe(201);
+    const rows = listShiftsInRange(db, "2026-10-01", "2026-10-31").filter((r) => r.employeeId === anya.id);
+    expect(rows.filter((r) => r.category === "vacation").map((r) => [r.date, r.endDate, r.note])).toEqual([
+      ["2026-10-12", "2026-10-15", "море"],
+      ["2026-10-17", null, "море"],
+    ]);
+    expect(rows.filter((r) => r.category === "shift").map((r) => [r.date, r.start, r.end])).toEqual([["2026-10-16", "09:00", "18:00"]]);
+  });
+});
