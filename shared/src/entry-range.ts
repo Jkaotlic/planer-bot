@@ -213,6 +213,24 @@ export function absenceDaysOf<T extends { id: number }>(occupancy: EntryRangeOcc
 }
 
 /**
+ * Почему названное отсутствие заменить нельзя, или `null`. Одно на сервер и оба
+ * мока: DEV, отвечающий другими словами или пропускающий чужой отпуск, —
+ * второй источник правды, расходящийся с продом молча.
+ *
+ * Чужое — не замена его отпуска, а запись другому; не отсутствие — заменять в
+ * нём нечего; не найдено — запись удалили, пока форма была открыта.
+ */
+export function replaceAbsenceTargetError(
+  target: { employeeId: number | null; category: EntryCategory } | undefined,
+  employeeId: number,
+): string | null {
+  if (!target) return "Заменяемое отсутствие не найдено — обновите график";
+  if (target.employeeId !== employeeId) return "Заменяемое отсутствие принадлежит другому человеку";
+  if (!isAbsence(target.category)) return "Заменить можно только отпуск, больничный или командировку";
+  return null;
+}
+
+/**
  * Что остаётся от полосы, если вырезать из неё дни, — подряд идущими кусками.
  *
  * Кусков бывает два и больше: отпуск 12–17, из которого вырезана пятница, — это

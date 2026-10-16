@@ -72,6 +72,8 @@ import {
   planEntryRange,
   calendarFrom,
   entryRangeOccupancy,
+  absenceDaysOf,
+  replaceAbsenceTargetError,
   cutDaysFromSpan,
   isAbsence,
   REMINDER_HOUR_DEFAULT,
@@ -712,9 +714,15 @@ export async function mockCreateEntryRange(input: NewEntryRangeInput): Promise<E
   // Занятость с ВИДОМ — та же `entryRangeOccupancy`, что на сервере: рабочую
   // запись перезапись заменит, отпуск оставит (или вырежет по флагу), а день с
   // двумя записями пропустит.
-  const { occupied, work: holder, absence: absenceOn } = entryRangeOccupancy(
-    ALL_ENTRIES.filter((s) => s.employeeId === input.employeeId),
-  );
+  const occupancy = entryRangeOccupancy(ALL_ENTRIES.filter((s) => s.employeeId === input.employeeId));
+  const { occupied, work: holder, absence: absenceOn } = occupancy;
+  // Замена одного отсутствия — те же проверки и те же слова, что у сервера.
+  let replaceAbsenceDays: Set<string> | undefined;
+  if (input.replaceAbsenceEntryId != null) {
+    const refused = replaceAbsenceTargetError(ALL_ENTRIES.find((s) => s.id === input.replaceAbsenceEntryId), input.employeeId);
+    if (refused) throw new Error(refused);
+    replaceAbsenceDays = absenceDaysOf(occupancy, input.replaceAbsenceEntryId);
+  }
   const mode = input.mode ?? "fill";
   const plan = planEntryRange({
     from: input.from,
@@ -723,6 +731,7 @@ export async function mockCreateEntryRange(input: NewEntryRangeInput): Promise<E
     includeWeekends: input.includeWeekends ?? false,
     mode,
     replaceAbsences: input.replaceAbsences ?? false,
+    replaceAbsenceDays,
     occupied,
     // DEV-мок живёт без базы: праздников у него нет, и выдумывать их нечем.
     calendar: mockDayCalendar(),

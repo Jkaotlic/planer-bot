@@ -122,6 +122,7 @@ import {
   planEntryRange,
   entryRangeOccupancy,
   absenceDaysOf,
+  replaceAbsenceTargetError,
   cutDaysFromSpan,
   sickSpanIntersection,
   eachDayIso,
@@ -1556,13 +1557,8 @@ export function createApp(deps: AppDeps): Hono<Env> {
     let replaceAbsenceDays: Set<string> | undefined;
     if (input.replaceAbsenceEntryId != null) {
       const target = getShift(db, input.replaceAbsenceEntryId);
-      if (!target) return c.json({ error: "Заменяемое отсутствие не найдено — обновите график" }, 400);
-      if (target.employeeId !== input.employeeId) {
-        return c.json({ error: "Заменяемое отсутствие принадлежит другому человеку" }, 400);
-      }
-      if (!isAbsence(target.category)) {
-        return c.json({ error: "Заменить можно только отпуск, больничный или командировку" }, 400);
-      }
+      const refused = replaceAbsenceTargetError(target, input.employeeId);
+      if (refused || !target) return c.json({ error: refused }, 400);
       replaceAbsenceDays = absenceDaysOf(occupancy, target.id);
     }
 

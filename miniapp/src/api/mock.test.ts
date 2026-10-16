@@ -762,3 +762,41 @@ describe("мок диапазона с заменой отсутствия — �
     expect(await vacations()).toEqual([]);
   });
 });
+
+/** Замена одного отсутствия — так же, как сервер (entries-range.test.ts). */
+describe("мок диапазона с заменой одного отсутствия — как сервер", () => {
+  // 2099-03-02 — понедельник, 06-е — пятница.
+  const vacations = async () =>
+    (await mockGetTeamSchedule("2099-03-01", "2099-03-08")).shifts
+      .filter((s) => s.employeeId === 1 && s.category === "vacation")
+      .map((s) => ({ date: s.date, endDate: s.endDate }));
+
+  it("режет только названный отпуск, второй пропущен по отсутствию", async () => {
+    const { entry: first } = await mockCreateEntry({ date: "2099-03-02", endDate: "2099-03-03", category: "vacation", employeeId: 1 });
+    const { entry: second } = await mockCreateEntry({ date: "2099-03-05", endDate: "2099-03-06", category: "vacation", employeeId: 1 });
+    createdEntryIds.push(second.id);
+
+    const result = await mockCreateEntryRange({
+      employeeId: 1, from: "2099-03-02", to: "2099-03-06", category: "shift", start: "09:00", end: "18:00",
+      mode: "rewrite", replaceAbsenceEntryId: first.id,
+    });
+    createdEntryIds.push(...result.created.map((s) => s.id));
+
+    expect(result.created.map((s) => s.date)).toEqual(["2099-03-02", "2099-03-03", "2099-03-04"]);
+    expect(result.replacedAbsence).toEqual(["2099-03-02", "2099-03-03"]);
+    expect(result.skipped).toEqual([
+      { date: "2099-03-05", reason: "absence" },
+      { date: "2099-03-06", reason: "absence" },
+    ]);
+    expect(await vacations()).toEqual([{ date: "2099-03-05", endDate: "2099-03-06" }]);
+  });
+
+  it("чужое отсутствие — ошибка тем же текстом, что у сервера", async () => {
+    const { entry } = await mockCreateEntry({ date: "2099-03-02", category: "vacation", employeeId: 2 });
+    createdEntryIds.push(entry.id);
+    await expect(mockCreateEntryRange({
+      employeeId: 1, from: "2099-03-02", to: "2099-03-02", category: "shift", start: "09:00", end: "18:00",
+      mode: "rewrite", replaceAbsenceEntryId: entry.id,
+    })).rejects.toThrow("Заменяемое отсутствие принадлежит другому человеку");
+  });
+});

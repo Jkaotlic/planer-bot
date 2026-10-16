@@ -169,3 +169,32 @@ describe("мок консоли: диапазон с заменой отсутс
     }
   });
 });
+
+/** Замена одного отсутствия — так же, как сервер (entries-range.test.ts). */
+describe("мок консоли: диапазон с заменой одного отсутствия", () => {
+  it("режет только названный отпуск, второй пропущен по отсутствию; чужой — ошибка", async () => {
+    // 2099-03-02 — понедельник, 06-е — пятница.
+    const { entry: first } = await mockCreateEntry({ date: "2099-03-02", endDate: "2099-03-03", category: "vacation", employeeId: 1 });
+    const { entry: second } = await mockCreateEntry({ date: "2099-03-05", endDate: "2099-03-06", category: "vacation", employeeId: 1 });
+    const { entry: foreign } = await mockCreateEntry({ date: "2099-03-02", category: "vacation", employeeId: 2 });
+    try {
+      await expect(mockCreateEntryRange({
+        employeeId: 1, from: "2099-03-02", to: "2099-03-06", category: "shift", start: "09:00", end: "18:00",
+        mode: "rewrite", replaceAbsenceEntryId: foreign.id,
+      })).rejects.toThrow("Заменяемое отсутствие принадлежит другому человеку");
+
+      const result = await mockCreateEntryRange({
+        employeeId: 1, from: "2099-03-02", to: "2099-03-06", category: "shift", start: "09:00", end: "18:00",
+        mode: "rewrite", replaceAbsenceEntryId: first.id,
+      });
+      expect(result.created.map((s) => s.date)).toEqual(["2099-03-02", "2099-03-03", "2099-03-04"]);
+      expect(result.skipped.map((s) => s.reason)).toEqual(["absence", "absence"]);
+      const left = (await mockGetTeamSchedule("2099-03-01", "2099-03-08"))
+        .filter((s) => s.employeeId === 1 && s.category === "vacation").map((s) => s.id);
+      expect(left).toEqual([second.id]);
+    } finally {
+      const left = (await mockGetTeamSchedule("2099-03-01", "2099-03-08")).filter((s) => s.employeeId === 1 || s.employeeId === 2);
+      await Promise.all(left.filter((s) => s.date >= "2099-03-01").map((s) => mockDeleteEntry(s.id)));
+    }
+  });
+});
