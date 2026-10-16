@@ -482,7 +482,7 @@ describe("AddEntryPanel — отсутствие, сокращённое до о
  * Замена отсутствия — зеркало мини-аппа (entry-form-kinds.test.tsx). Прод,
  * 2026-10-16: отпуск, сохранённый «Днём», не менялся вовсе — перезапись его
  * пропускала. Смена вида у отсутствия — явное намерение, и панель шлёт
- * `replaceAbsences`; обычная расстановка заменяет только по галочке.
+ * `replaceAbsenceEntryId`; обычная расстановка заменяет только по галочке.
  */
 describe("AddEntryPanel — замена отсутствия", () => {
   const save = async (el: HTMLElement) =>
@@ -506,7 +506,22 @@ describe("AddEntryPanel — замена отсутствия", () => {
     await save(el);
 
     expect(single).toBe(0);
-    expect(saved).toMatchObject({ from: "2026-06-08", to: "2026-06-22", mode: "rewrite", replaceAbsences: true, templateId: 3 });
+    expect(saved).toMatchObject({ from: "2026-06-08", to: "2026-06-22", mode: "rewrite", replaceAbsenceEntryId: longVacation.id, templateId: 3 });
+    expect(saved).not.toHaveProperty("replaceAbsences");
+  });
+
+  // Проверка ветки: у человека второй отпуск 25–30 июня, «По» тянут до 26-го.
+  // Общая замена срезала бы и его, о котором панель молчит; уходит id правимого.
+  it("«По» за правимым отпуском: в запросе id правимого, а не общая замена", async () => {
+    let saved: NewEntryRangeInput | null = null;
+    const el = await mount({ existing: longVacation, onSaveRange: async (input) => { saved = input; } });
+    await act(async () => optionByText(el, "День").click());
+    await setInput(el.querySelector<HTMLInputElement>("#entry-to")!, "2026-06-26");
+    expect(el.querySelector('[data-testid="range-preview"]')!.textContent).toContain("Другие отсутствия в этих днях останутся на месте");
+    await save(el);
+
+    expect(saved).toMatchObject({ from: "2026-06-08", to: "2026-06-26", replaceAbsenceEntryId: longVacation.id });
+    expect(saved).not.toHaveProperty("replaceAbsences");
   });
 
   // Админ хочет «Днём» только пятницу 12-го: суженные «С/По» — замена одного дня,
@@ -526,7 +541,7 @@ describe("AddEntryPanel — замена отсутствия", () => {
     await save(el);
 
     expect(single).toBe(0);
-    expect(saved).toMatchObject({ from: "2026-06-12", to: "2026-06-12", replaceAbsences: true });
+    expect(saved).toMatchObject({ from: "2026-06-12", to: "2026-06-12", replaceAbsenceEntryId: longVacation.id });
   });
 
   it("обычная расстановка по умолчанию не заменяет, с галочкой — заменяет", async () => {

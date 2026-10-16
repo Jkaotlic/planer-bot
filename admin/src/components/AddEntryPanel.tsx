@@ -141,17 +141,21 @@ export function AddEntryPanel({
   /**
    * Отсутствие, которому сменили вид на рабочий, — явное намерение заменить
    * (прод, 2026-10-16: отпуск, сохранённый «Днём», не менялся вовсе). Уходит
-   * отрезком с `replaceAbsences` даже на один день: правка строки перенесла бы
-   * в смену ВЕСЬ отпуск, а суженные «С/По» значат «только эти дни». Человек тот
-   * же — иначе это уже не замена его отпуска, а запись другому. Зеркало мини-аппа.
+   * отрезком с заменой даже на один день: правка строки перенесла бы в смену
+   * ВЕСЬ отпуск, а суженные «С/По» значат «только эти дни». Человек тот же —
+   * иначе это уже не замена его отпуска, а запись другому. Зеркало мини-аппа.
+   *
+   * Заменяется только ЭТА запись (`replaceAbsenceEntryId`), а не любое
+   * отсутствие в «С/По»: «По», заехавшее на соседний отпуск, срезало бы и его,
+   * а панель о нём не знает и предпросмотр промолчал бы (решение владельца).
    */
   const replacingEdited =
     rangeAllowed && existing != null && isAbsence(existing.category) && !absence && employeeId === existing.employeeId;
   const viaRange = (rangeAllowed && isRange) || replacingEdited;
-  const replaceAbsences = replacingEdited || replaceToggle;
   // Про правимое отсутствие панель знает всё, и предпросмотр честно считает его дни.
+  const editedDays = replacingEdited ? eachDayIso(existing.date, existing.endDate ?? existing.date) : [];
   const occupied: Record<string, DayOccupancy> | undefined = replacingEdited
-    ? Object.fromEntries(eachDayIso(existing.date, existing.endDate ?? existing.date).map((d) => [d, "absence" as const]))
+    ? Object.fromEntries(editedDays.map((d) => [d, "absence" as const]))
     : undefined;
 
   /**
@@ -164,7 +168,11 @@ export function AddEntryPanel({
    * обязан считать праздник выходным ровно так же, как посчитает сервер, иначе
    * он пообещает пять дней там, где встанет четыре.
    */
-  const plan = planEntryRange({ from, to, category, includeWeekends, mode, replaceAbsences, occupied, calendar });
+  const plan = planEntryRange({
+    from, to, category, includeWeekends, mode, occupied, calendar,
+    replaceAbsences: !replacingEdited && replaceToggle,
+    replaceAbsenceDays: replacingEdited ? new Set(editedDays) : undefined,
+  });
 
   function selectPreset(template: Template) {
     setChoice({ kind: "preset", templateId: template.id });
@@ -242,7 +250,7 @@ export function AddEntryPanel({
         await onSaveRange!({
           ...entryFields(), employeeId, from, to, includeWeekends, mode,
           // Поле только когда «да»: тело без него — то, что сервер понимает как «нет».
-          ...(replaceAbsences ? { replaceAbsences: true } : {}),
+          ...(replacingEdited ? { replaceAbsenceEntryId: existing.id } : replaceToggle ? { replaceAbsences: true } : {}),
         });
       } else {
         const input: NewEntryInput = { ...entryFields(), date: from };
@@ -451,7 +459,7 @@ export function AddEntryPanel({
             )}
             <div className="range-preview" data-testid="range-preview">
               Поставится {describeEntryRangePlan(plan)}.{" "}
-              {replacingEdited && existing ? absenceReplaceHint(existing.category) : entryRangeHint(mode, replaceAbsences)}
+              {replacingEdited && existing ? absenceReplaceHint(existing.category) : entryRangeHint(mode, replaceToggle)}
             </div>
           </div>
         )}
