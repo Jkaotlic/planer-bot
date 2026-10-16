@@ -477,3 +477,71 @@ describe("AddEntryPanel — отсутствие, сокращённое до о
     expect(saved!).not.toHaveProperty("endDate");
   });
 });
+
+/**
+ * Замена отсутствия — зеркало мини-аппа (entry-form-kinds.test.tsx). Прод,
+ * 2026-10-16: отпуск, сохранённый «Днём», не менялся вовсе — перезапись его
+ * пропускала. Смена вида у отсутствия — явное намерение, и панель шлёт
+ * `replaceAbsences`; обычная расстановка заменяет только по галочке.
+ */
+describe("AddEntryPanel — замена отсутствия", () => {
+  const save = async (el: HTMLElement) =>
+    act(async () => [...el.querySelectorAll("button")].find((b) => b.textContent === "Сохранить")!.click());
+  const replaceBox = (el: HTMLElement) =>
+    [...el.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')]
+      .find((box) => (box.closest("label")?.textContent ?? "").includes("Заменить отпуск и больничный"));
+
+  it("отпуск, переведённый в «День», уходит заменой, а не правкой", async () => {
+    let saved: NewEntryRangeInput | null = null;
+    let single = 0;
+    const el = await mount({
+      existing: longVacation,
+      onSave: async () => { single += 1; },
+      onSaveRange: async (input) => { saved = input; },
+    });
+    await act(async () => optionByText(el, "День").click());
+    expect(el.querySelector('[data-testid="range-preview"]')!.textContent).toContain("Отпуск в эти дни заменится новой записью");
+    // Отпуск 8–22 июня, будни: 11 дней заменятся, выходные останутся отпуском.
+    expect(el.querySelector('[data-testid="range-preview"]')!.textContent).toContain("11 дней отсутствия заменятся");
+    await save(el);
+
+    expect(single).toBe(0);
+    expect(saved).toMatchObject({ from: "2026-06-08", to: "2026-06-22", mode: "rewrite", replaceAbsences: true, templateId: 3 });
+  });
+
+  // Админ хочет «Днём» только пятницу 12-го: суженные «С/По» — замена одного дня,
+  // а не правка строки, которая перенесла бы в смену весь отпуск.
+  it("один день из отпуска: суженные «С/По» шлют замену одного дня", async () => {
+    let saved: NewEntryRangeInput | null = null;
+    let single = 0;
+    const el = await mount({
+      existing: longVacation,
+      onSave: async () => { single += 1; },
+      onSaveRange: async (input) => { saved = input; },
+    });
+    await act(async () => optionByText(el, "День").click());
+    await setInput(el.querySelector<HTMLInputElement>("#entry-from")!, "2026-06-12");
+    await setInput(el.querySelector<HTMLInputElement>("#entry-to")!, "2026-06-12");
+    expect(el.querySelector('[data-testid="range-preview"]')!.textContent).toContain("1 день отсутствия заменится");
+    await save(el);
+
+    expect(single).toBe(0);
+    expect(saved).toMatchObject({ from: "2026-06-12", to: "2026-06-12", replaceAbsences: true });
+  });
+
+  it("обычная расстановка по умолчанию не заменяет, с галочкой — заменяет", async () => {
+    const calls: NewEntryRangeInput[] = [];
+    const el = await mount({ onSaveRange: async (input) => { calls.push(input); } });
+    await setInput(el.querySelector<HTMLInputElement>("#entry-to")!, "2026-06-12");
+
+    const box = replaceBox(el);
+    expect(box?.checked).toBe(false);
+    await save(el);
+    expect(calls[0]!.replaceAbsences).toBeUndefined();
+
+    await act(async () => box!.click());
+    expect(el.querySelector('[data-testid="range-preview"]')!.textContent).toContain("уступят место новой записи");
+    await save(el);
+    expect(calls[1]).toMatchObject({ replaceAbsences: true, mode: "fill" });
+  });
+});
