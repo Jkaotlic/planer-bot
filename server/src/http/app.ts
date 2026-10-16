@@ -121,6 +121,7 @@ import {
   resolveShiftTimes,
   planEntryRange,
   entryRangeOccupancy,
+  absenceDaysOf,
   cutDaysFromSpan,
   sickSpanIntersection,
   eachDayIso,
@@ -1544,9 +1545,26 @@ export function createApp(deps: AppDeps): Hono<Env> {
     // рабочую запись она заменит, отпуск оставит (или вырежет, если просили), а
     // день, где записей две, пропустит, потому что какую из них переписывать,
     // знать неоткуда. Правило одно на сервер и оба мока — `entryRangeOccupancy`.
-    const { occupied, work: holder, absence: absenceOn } = entryRangeOccupancy(
+    const occupancy = entryRangeOccupancy(
       listShiftsOverlapping(db, input.from, input.to).filter((row) => row.employeeId === input.employeeId),
     );
+    const { occupied, work: holder, absence: absenceOn } = occupancy;
+
+    // Замена одного отсутствия проверяется ДО плана: id пришёл из формы, и
+    // запись могли удалить, или форма спутала человека — молча расставить без
+    // замены значило бы снова «сохранил, а ничего не поменялось».
+    let replaceAbsenceDays: Set<string> | undefined;
+    if (input.replaceAbsenceEntryId != null) {
+      const target = getShift(db, input.replaceAbsenceEntryId);
+      if (!target) return c.json({ error: "Заменяемое отсутствие не найдено — обновите график" }, 400);
+      if (target.employeeId !== input.employeeId) {
+        return c.json({ error: "Заменяемое отсутствие принадлежит другому человеку" }, 400);
+      }
+      if (!isAbsence(target.category)) {
+        return c.json({ error: "Заменить можно только отпуск, больничный или командировку" }, 400);
+      }
+      replaceAbsenceDays = absenceDaysOf(occupancy, target.id);
+    }
 
     const plan = planEntryRange({
       from: input.from,
@@ -1555,11 +1573,12 @@ export function createApp(deps: AppDeps): Hono<Env> {
       includeWeekends: input.includeWeekends,
       mode: input.mode,
       replaceAbsences: input.replaceAbsences,
+      replaceAbsenceDays,
       occupied,
       calendar: loadCalendar(db, input.from, input.to),
     });
 
-    const { from, to, includeWeekends, mode, replaceAbsences, ...entryFields } = input;
+    const { from, to, includeWeekends, mode, replaceAbsences, replaceAbsenceEntryId, ...entryFields } = input;
     const actorId = c.get("auth").employeeId;
     const now = teamNow(config.teamTz);
     // Часы считаются НА КАЖДЫЙ ДЕНЬ, а не берутся из тела один раз: у пресета
@@ -1679,7 +1698,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       skipped: plan.skipped.length,
       // Дни, а не записи: отпуск 12–17 с заменённой неделей — одна строка, но
       // админ спросит «сколько дней отпуска ушло», и ответ — пять.
-      ...(replaceAbsences ? { absenceDaysReplaced: plan.replacedAbsence.length } : {}),
+      ...(replaceAbsences || replaceAbsenceEntryId != null ? { absenceDaysReplaced: plan.replacedAbsence.length } : {}),
     });
 
     return c.json(

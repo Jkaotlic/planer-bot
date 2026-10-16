@@ -728,3 +728,86 @@ describe("POST /api/admin/entries/range · replaceAbsences", () => {
     expect(vacationOf(db, mark.id)).toEqual([{ date: "2026-10-12", endDate: "2026-10-17" }]);
   });
 });
+
+/**
+ * Замена ОДНОГО отсутствия — путь правки (проверка ветки, 2026-10-16). Админ
+ * правит отпуск 12–17 в «День» и тянет «По» до 24-го: общий `replaceAbsences`
+ * срезал бы и отпуск 20–25, о котором форма молчит. Решение владельца: из
+ * правки заменяется только правимая запись — `replaceAbsenceEntryId`.
+ */
+describe("POST /api/admin/entries/range · replaceAbsenceEntryId", () => {
+  const setup = async () => {
+    const db = makeTestDb();
+    const anya = createEmployee(db, { displayName: "Аня" });
+    const igor = createEmployee(db, { displayName: "Игорь" });
+    const first = createShift(db, { date: "2026-10-12", endDate: "2026-10-17", employeeId: anya.id, category: "vacation" });
+    const second = createShift(db, { date: "2026-10-20", endDate: "2026-10-25", employeeId: anya.id, category: "vacation" });
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const post = (body: Record<string, unknown>) =>
+      app.request("/api/admin/entries/range", authedJson(admin, {
+        employeeId: anya.id, from: "2026-10-12", to: "2026-10-24", category: "shift", start: "09:00", end: "18:00",
+        mode: "rewrite", ...body,
+      }));
+    return { db, anya, igor, first, second, post };
+  };
+
+  it("режет только названный отпуск, второй в диапазоне не тронут и пропущен по отсутствию", async () => {
+    const { db, first, second, post } = await setup();
+
+    const res = await post({ replaceAbsenceEntryId: first.id });
+
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    // 12–16 — будни первого отпуска, 19-е — свободный понедельник.
+    expect(body.created.map((s: { date: string }) => s.date)).toEqual([
+      "2026-10-12", "2026-10-13", "2026-10-14", "2026-10-15", "2026-10-16", "2026-10-19",
+    ]);
+    expect(body.replacedAbsence).toEqual(["2026-10-12", "2026-10-13", "2026-10-14", "2026-10-15", "2026-10-16"]);
+    expect(body.skipped.filter((s: { reason: string }) => s.reason === "absence").map((s: { date: string }) => s.date))
+      .toEqual(["2026-10-20", "2026-10-21", "2026-10-22", "2026-10-23"]);
+    expect(getShift(db, first.id)).toMatchObject({ date: "2026-10-17", endDate: null });
+    expect(getShift(db, second.id)).toMatchObject({ date: "2026-10-20", endDate: "2026-10-25", category: "vacation" });
+    const audit = listRecentAudit(db, 10).find((a) => a.type === "entries_range_rewritten")!;
+    expect(audit.payload).toMatchObject({ absenceDaysReplaced: 5 });
+  });
+
+  it("чужое отсутствие — 400 по-русски, ничего не тронуто", async () => {
+    const { db, igor, first, post } = await setup();
+    const foreign = createShift(db, { date: "2026-10-12", endDate: "2026-10-13", employeeId: igor.id, category: "sick_leave" });
+
+    const res = await post({ replaceAbsenceEntryId: foreign.id });
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("Заменяемое отсутствие принадлежит другому человеку");
+    expect(getShift(db, first.id)).toMatchObject({ date: "2026-10-12", endDate: "2026-10-17" });
+    expect(getShift(db, foreign.id)).toMatchObject({ date: "2026-10-12", endDate: "2026-10-13" });
+  });
+
+  it("не отсутствие — 400 по-русски", async () => {
+    const { db, anya, post } = await setup();
+    const work = createShift(db, { date: "2026-10-19", employeeId: anya.id, category: "shift", start: "09:00", end: "18:00" });
+
+    const res = await post({ replaceAbsenceEntryId: work.id });
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("Заменить можно только отпуск, больничный или командировку");
+  });
+
+  it("не найдено — 400 по-русски", async () => {
+    const { post } = await setup();
+
+    const res = await post({ replaceAbsenceEntryId: 99_999 });
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("Заменяемое отсутствие не найдено — обновите график");
+  });
+
+  it("вместе с общим replaceAbsences — 400: какое из двух правил, не угадать", async () => {
+    const { first, post } = await setup();
+
+    const res = await post({ replaceAbsenceEntryId: first.id, replaceAbsences: true });
+
+    expect(res.status).toBe(400);
+  });
+});

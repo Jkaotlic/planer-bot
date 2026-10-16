@@ -213,8 +213,19 @@ export const rangeEntrySchema = z
      * шлют выкаченные консоли, и молча снести им отпуск — худший исход ручки.
      */
     replaceAbsences: z.boolean().default(false),
+    /**
+     * Заменить только ЭТО отсутствие — путь правки одного отпуска. Уже, чем
+     * `replaceAbsences`: правка с «По», заехавшим на соседний отпуск, срезала бы
+     * и его, а форма о нём не знает. Остальные отсутствия пропускаются.
+     */
+    replaceAbsenceEntryId: z.number().int().positive().optional(),
   })
   .superRefine((v, ctx) => {
+    // Оба сразу — либо «все», либо «только это»: какое из правил имелось в
+    // виду, не угадать, а ошибка в сторону «все» сносит чужой отпуск.
+    if (v.replaceAbsences && v.replaceAbsenceEntryId != null) {
+      ctx.addIssue({ code: "custom", path: ["replaceAbsenceEntryId"], message: "либо заменить все отсутствия, либо одно — не оба сразу" });
+    }
     const err = entryTimesError(v);
     if (err) ctx.addIssue({ code: "custom", path: ["start"], message: err });
     if (v.to < v.from) ctx.addIssue({ code: "custom", path: ["to"], message: "диапазон не может кончаться раньше, чем начинается" });
