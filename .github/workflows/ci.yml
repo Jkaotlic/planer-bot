@@ -17,7 +17,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # Node 22, а не 20: `jsdom@30` требует `^22.22.2 || ^24.15.0 || >=26`, и его
       # `undici@8` зовёт `webidl.util.markAsUncloneable`, которого в двадцатке нет.
