@@ -68,6 +68,14 @@ export function getPoll(db: Db, id: number): Poll | undefined {
   return db.select().from(polls).where(eq(polls.id, id)).get();
 }
 
+/**
+ * Адресаты опроса, которые ещё в команде.
+ *
+ * Архивация строки `poll_recipients` не трогает, а опрос без срока живёт
+ * дольше, чем человек в команде. Без фильтра ушедший получал бы итог и
+ * «Опрос отменён» и стоял бы в «Не ответили», хотя отвечать ему уже не на
+ * что. Строка не удаляется: вернули из архива — он снова адресат.
+ */
 export function pollRecipientRows(db: Db, pollId: number) {
   return db
     .select({
@@ -78,7 +86,7 @@ export function pollRecipientRows(db: Db, pollId: number) {
     })
     .from(pollRecipients)
     .innerJoin(employees, eq(employees.id, pollRecipients.employeeId))
-    .where(eq(pollRecipients.pollId, pollId))
+    .where(and(eq(pollRecipients.pollId, pollId), eq(employees.isActive, true)))
     .orderBy(pollRecipients.employeeId)
     .all();
 }

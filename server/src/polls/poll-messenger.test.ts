@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { makeTestDb } from "../db/testdb";
-import { createEmployee, linkTelegramAccount } from "../repo/employees";
+import { archiveEmployee, createEmployee, linkTelegramAccount, restoreEmployee } from "../repo/employees";
 import { recordApi, silentBot } from "../bot/testbot";
 import type { Db } from "../db/client";
-import { castVote, closePoll, createPoll, getPoll, pollRecipientRows } from "./poll-service";
+import { cancelPoll, castVote, closePoll, createPoll, getPoll, pollRecipientRows } from "./poll-service";
 import { finishPollMessages, redrawPollMessage, sendPollInvites } from "./poll-messenger";
 
 const now = { date: "2026-09-29", time: "12:00" };
@@ -82,6 +82,49 @@ describe("рассылка опроса", () => {
     await finishPollMessages(bot, db, getPoll(db, poll.id)!, "closed");
     expect(sent.map((m) => m.chat_id).sort()).toEqual([100, 101]);
     expect(sent.every((m) => m.text.includes("Итоги опроса"))).toBe(true);
+  });
+});
+
+describe("архивный адресат опроса", () => {
+  // Человека архивировали между рассылкой и итогом: строка `poll_recipients`
+  // осталась, но он уже не в команде — ни писем, ни места в «Не ответили».
+  async function stageArchived() {
+    const db = makeTestDb();
+    const anya = person(db, "Аня", 100);
+    const igor = person(db, "Игорь", 101);
+    const poll = createPoll(db, { createdBy: anya.id, question: "Пицца?", closesAt: null, recipientIds: [anya.id, igor.id] });
+    await sendPollInvites(silentBot().bot, db, poll, now);
+    archiveEmployee(db, igor.id, now.date);
+    const { bot } = silentBot();
+    const api = recordApi(bot);
+    return { db, anya, igor, poll, bot, api };
+  }
+
+  it("итог не уходит архивному, и в «Не ответили» его нет", async () => {
+    const { db, anya, poll, bot, api } = await stageArchived();
+    closePoll(db, poll, anya);
+    await finishPollMessages(bot, db, getPoll(db, poll.id)!, "closed");
+    expect(api.calls.filter((c) => c.payload?.chat_id === 101)).toEqual([]);
+    const result = api.sent.find((m) => m.chat_id === 100)!;
+    expect(result.text).toContain("Не ответили — 1: Аня");
+    expect(result.text).not.toContain("Игорь");
+  });
+
+  it("«Опрос отменён» не уходит архивному", async () => {
+    const { db, anya, poll, bot, api } = await stageArchived();
+    cancelPoll(db, poll, anya);
+    await finishPollMessages(bot, db, getPoll(db, poll.id)!, "cancelled");
+    expect(api.calls.filter((c) => c.payload?.chat_id === 101)).toEqual([]);
+    expect(api.sent.map((m) => m.chat_id)).toEqual([100]);
+  });
+
+  it("вернули из архива до итога — снова получает итог и стоит в нём", async () => {
+    const { db, anya, igor, poll, bot, api } = await stageArchived();
+    restoreEmployee(db, igor.id);
+    closePoll(db, poll, anya);
+    await finishPollMessages(bot, db, getPoll(db, poll.id)!, "closed");
+    const toIgor = api.sent.find((m) => m.chat_id === 101)!;
+    expect(toIgor.text).toContain("Не ответили — 2: Аня, Игорь");
   });
 });
 
