@@ -203,3 +203,25 @@ describe("«Напомнить молчащим»", () => {
     expect(api.sent).toEqual([]);
   });
 });
+
+describe("срок в письме — абсолютным днём, не «завтра»", () => {
+  // Письмо, ушедшее в 23:50 пн, читают утром вт: «до завтра, 08:00» тогда врало бы.
+  const lateNight = { date: "2026-10-26", time: "23:50" };
+
+  it("приглашение и напоминание на срок 08:00 следующего дня называют день и дату", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня", 100);
+    const igor = person(db, "Игорь", 101);
+    const poll = createPoll(db, { createdBy: anya.id, question: "Пицца?", closesAt: "2026-10-27T08:00", recipientIds: [anya.id, igor.id] });
+    const { bot } = silentBot();
+    const api = recordApi(bot);
+    await sendPollInvites(bot, db, poll, lateNight);
+    await remindSilent(bot, db, poll, lateNight);
+    const toIgor = api.sent.filter((m) => m.chat_id === 101);
+    expect(toIgor).toHaveLength(2);
+    for (const m of toIgor) {
+      expect(m.text).toContain("Голосуем до Вт 27 октября, 08:00.");
+      expect(m.text).not.toContain("завтра");
+    }
+  });
+});

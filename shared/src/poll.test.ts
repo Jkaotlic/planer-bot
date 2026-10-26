@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { closesAtFromTime, closesLabel, isFutureClose, isOpenAt, isWithinCloseHorizon, pollInviteText, pollResultText, pollTally, pollTallyLines, POLL_CHOICES_HINT } from "./poll";
+import { closesAtFromTime, closesLabel, closesLetterLabel, isFutureClose, isOpenAt, isWithinCloseHorizon, pollInviteText, pollResultText, pollTally, pollTallyLines, POLL_CHOICES_HINT } from "./poll";
 import { TELEGRAM_TEXT_SAFE_MAX } from "./text-limits";
 
 const now = { date: "2026-09-29", time: "12:00" };
@@ -69,6 +69,17 @@ describe("closesLabel", () => {
 
   it("«завтра» считается через границу месяца", () => {
     expect(closesLabel("2026-11-01T23:30", "2026-10-31")).toBe("до завтра, 23:30");
+  });
+});
+
+describe("closesLetterLabel — срок в письме бота", () => {
+  // Письмо читают позже, чем отправили: «до завтра» из письма, ушедшего в 23:50,
+  // утром значило бы послезавтра. Поэтому не сегодня — только абсолютным днём.
+  it("в день отправки — только время; иначе — день недели и дата, без «завтра»", () => {
+    expect(closesLetterLabel("2026-10-26T18:00", "2026-10-26")).toBe("до 18:00");
+    expect(closesLetterLabel("2026-10-27T08:00", "2026-10-26")).toBe("до Вт 27 октября, 08:00");
+    expect(closesLetterLabel("2026-11-01T23:30", "2026-10-31")).toBe("до Вс 1 ноября, 23:30");
+    expect(closesLetterLabel(null, "2026-10-26")).toBeNull();
   });
 });
 

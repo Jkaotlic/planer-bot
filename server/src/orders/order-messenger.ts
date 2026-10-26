@@ -1,6 +1,6 @@
 import { InlineKeyboard, type Bot } from "grammy";
 import {
-  type FoodMenuItemShape, closesLabel, debtors, formatMoney, isOpenAt, menuItemLabel, orderInviteText, organizerSummaryText, payRequestText, splitAtLines,
+  type FoodMenuItemShape, closesLetterLabel, debtors, formatMoney, isOpenAt, menuItemLabel, orderInviteText, organizerSummaryText, payRequestText, splitAtLines,
 } from "@planer/shared";
 import { eq } from "drizzle-orm";
 import type { Db } from "../db/client";
@@ -60,7 +60,8 @@ export function orderTextFor(db: Db, order: FoodOrder, employeeId: number, today
     placeName: placeName(db, order),
     note: order.note,
     payHint: order.payHint,
-    closes: closesLabel(order.closesAt, today),
+    // Письмо читают позже, чем отправили, — срок не сегодня называется днём, не «завтра».
+    closes: closesLetterLabel(order.closesAt, today),
     myItems: itemsOf(db, order.id).filter((i) => i.employeeId === employeeId),
     declined: hasDeclined(db, order.id, employeeId),
   });

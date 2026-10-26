@@ -2,7 +2,7 @@ import { z } from "zod";
 import { formatDayMonth } from "./collection";
 import { FOOD_CLOSE_HORIZON_DAYS } from "./food-order";
 import { TELEGRAM_TEXT_SAFE_MAX } from "./text-limits";
-import { addDaysIso } from "./week-dates";
+import { addDaysIso, weekdayShort } from "./week-dates";
 
 /**
  * Опрос «За / Против / Воздержался».
@@ -94,6 +94,7 @@ export function isWithinCloseHorizon(closesAt: string | null, today: string): bo
  *
  * «Завтра» отдельно, потому что «08:00» в полдень теперь значит завтрашнее утро
  * (`closesAtFromTime`): по одной дате человек не сразу поймёт, что это не сегодня.
+ * Только для экранов — они пересчитывают подпись при открытии; письмам — `closesLetterLabel`.
  */
 export function closesLabel(closesAt: string | null, today: string): string | null {
   if (!closesAt) return null;
@@ -101,6 +102,21 @@ export function closesLabel(closesAt: string | null, today: string): string | nu
   if (date === today) return `до ${time}`;
   if (date === addDaysIso(today, 1)) return `до завтра, ${time}`;
   return `до ${formatDayMonth(date ?? "")}, ${time}`;
+}
+
+/**
+ * Срок в письме бота: «до 18:00» в день отправки, иначе «до Вт 27 октября, 08:00».
+ *
+ * Не «завтра», в отличие от `closesLabel` экранов: экран пересчитывает подпись
+ * при каждом открытии, а письмо читают позже, чем отправили. Ушедшее в 23:50
+ * «до завтра, 08:00» утром читалось бы как послезавтра, хотя до срока час.
+ * Вид даты — тот же «Вт 27 октября», что у подсказки о нехватке (`coverage.ts`).
+ */
+export function closesLetterLabel(closesAt: string | null, sentDate: string): string | null {
+  if (!closesAt) return null;
+  const [date = "", time] = closesAt.split("T");
+  if (date === sentDate) return `до ${time}`;
+  return `до ${weekdayShort(date)} ${formatDayMonth(date)}, ${time}`;
 }
 
 export interface PollTally {

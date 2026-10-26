@@ -108,6 +108,27 @@ describe("кнопка «🧰 Сервисы»", () => {
     expect(buttons[2]!.web_app!.url).toBe("https://example.com/app/?screen=orders&new=poll");
   });
 
+  // Ответ «Сервисов» — тоже письмо, его читают позже: срок не сегодня — абсолютным днём.
+  it("срок не сегодня — «до Вт 27 октября, 08:00», а не «до завтра»", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-26T20:50:00Z")); // 23:50 по Москве
+    try {
+      const { db, bot, anya, igor } = stage();
+      createPoll(db, { createdBy: anya.id, question: "Суши?", closesAt: "2026-10-27T08:00", recipientIds: [anya.id, igor.id] });
+      createOrder(db, {
+        createdBy: anya.id, placeId: null, title: "Вода", allowCustom: true, note: null, payHint: null, closesAt: "2026-10-27T09:00", recipientIds: [anya.id, igor.id],
+      });
+      const api = recordApi(bot);
+      await say(bot, 333, BTN_SERVICES);
+      const text = api.sent.at(-1)!.text;
+      expect(text).toContain("🗳 Суши? (до Вт 27 октября, 08:00)");
+      expect(text).toContain("Вода (до Вт 27 октября, 09:00)");
+      expect(text).not.toContain("завтра");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   // Keyboards already on people's phones still say «🍱 Заказы» until the next /start.
   it("старая подпись «🍱 Заказы» из висящей клавиатуры открывает то же меню, а не заглушку", async () => {
     const { bot } = stage();

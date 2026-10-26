@@ -1,5 +1,5 @@
 import { InlineKeyboard, type Bot, type Context } from "grammy";
-import { formatKg, isOpenAt, orderTotal, pollChoiceSchema, TELEGRAM_TEXT_SAFE_MAX } from "@planer/shared";
+import { closesLetterLabel, formatKg, isOpenAt, orderTotal, pollChoiceSchema, TELEGRAM_TEXT_SAFE_MAX } from "@planer/shared";
 import type { Config } from "../config";
 import type { Db } from "../db/client";
 import type { Employee } from "../db/schema";
@@ -121,9 +121,15 @@ export function installFoodHandlers(bot: Bot, deps: FoodHandlerDeps): { sendServ
     const now = teamNow(config.teamTz);
     const open = listPollsFor(db, viewerOf(who.me, from.id), now).filter((p) => p.open);
     const orders = listOrdersFor(db, viewerOf(who.me, from.id), now).filter((o) => o.open);
+    // Срок — письменным видом (`closesLetterLabel`), а не экранным `closes` из вида:
+    // ответ остаётся в чате, и «до завтра» к утру соврало бы.
+    const due = (closesAt: string | null) => {
+      const label = closesLetterLabel(closesAt, now.date);
+      return label ? ` (${label})` : "";
+    };
     const rows = [
-      ...orders.map((o) => `${o.title ? "🛒" : "🍱"} ${o.creatorName}: ${o.title ?? o.placeName ?? "заказ без меню"}${o.closes ? ` (${o.closes})` : ""}`),
-      ...open.map((p) => `🗳 ${p.question}${p.closes ? ` (${p.closes})` : ""}`),
+      ...orders.map((o) => `${o.title ? "🛒" : "🍱"} ${o.creatorName}: ${o.title ?? o.placeName ?? "заказ без меню"}${due(o.closesAt)}`),
+      ...open.map((p) => `🗳 ${p.question}${due(p.closesAt)}`),
     ];
     const compose = (shown: number) => {
       const rest = rows.length - shown;

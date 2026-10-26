@@ -1,6 +1,6 @@
 import { InlineKeyboard, type Bot } from "grammy";
 import {
-  POLL_CHOICE_LABEL, POLL_CHOICES, closesLabel, isOpenAt, pollInviteText, pollResultText, pollTally, type PollChoice,
+  POLL_CHOICE_LABEL, POLL_CHOICES, closesLetterLabel, isOpenAt, pollInviteText, pollResultText, pollTally, type PollChoice,
 } from "@planer/shared";
 import type { Db } from "../db/client";
 import { employees, pollVotes, type Poll } from "../db/schema";
@@ -32,12 +32,16 @@ function creatorName(db: Db, poll: Poll): string {
   return db.select({ name: employees.displayName }).from(employees).where(eq(employees.id, poll.createdBy)).get()?.name ?? "Коллега";
 }
 
-/** Текст письма опроса для конкретного человека — и при рассылке, и после его тапа. */
+/**
+ * Текст письма опроса для конкретного человека — и при рассылке, и после его тапа.
+ * Срок — `closesLetterLabel`, а не экранный `closesLabel`: письмо читают позже,
+ * и «до завтра» из него к утру соврало бы.
+ */
 export function pollTextFor(db: Db, poll: Poll, employeeId: number, today: string): string {
   return pollInviteText({
     creatorName: creatorName(db, poll),
     question: poll.question,
-    closes: closesLabel(poll.closesAt, today),
+    closes: closesLetterLabel(poll.closesAt, today),
     myChoice: voteOf(db, poll.id, employeeId),
   });
 }

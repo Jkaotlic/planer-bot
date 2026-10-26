@@ -212,3 +212,16 @@ describe("перерисовка письма заказа", () => {
     expect(api.calls.filter((c) => c.method === "editMessageText")).toHaveLength(1);
   });
 });
+
+describe("срок в письме заказа — абсолютным днём, не «завтра»", () => {
+  it("приглашение, ушедшее в 23:50, на срок 08:00 следующего дня называет день и дату", async () => {
+    const { db, anya, igor } = stage();
+    const order = createOrder(db, { createdBy: anya.id, placeId: null, title: null, allowCustom: true, note: null, payHint: null, closesAt: "2026-10-27T08:00", recipientIds: [anya.id, igor.id] });
+    const { bot } = silentBot();
+    const api = recordApi(bot);
+    await sendOrderInvites(bot, db, order, { date: "2026-10-26", time: "23:50" }, URL);
+    const toIgor = api.sent.find((m) => m.chat_id === 101)!;
+    expect(toIgor.text).toContain("до Вт 27 октября, 08:00");
+    expect(toIgor.text).not.toContain("завтра");
+  });
+});
