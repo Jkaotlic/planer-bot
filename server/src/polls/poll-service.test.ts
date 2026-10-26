@@ -110,4 +110,20 @@ describe("вид опроса", () => {
     createPoll(db, { createdBy: igor.id, question: "Второй", closesAt: null, recipientIds: [igor.id, anya.id] });
     expect(listPollsFor(db, anya, now).map((p) => p.question)).toEqual(["Второй", "Пицца в пятницу?"]);
   });
+
+  it("админ видит в списке чужие идущие опросы — закрыть он вправе, значит, должен их видеть", () => {
+    const { db, anya, mark } = stage();
+    const done = createPoll(db, { createdBy: anya.id, question: "Уже закрыт", closesAt: null, recipientIds: [anya.id] });
+    closePoll(db, done, anya);
+    const dropped = createPoll(db, { createdBy: anya.id, question: "Отменён", closesAt: null, recipientIds: [anya.id] });
+    cancelPoll(db, dropped, anya);
+    expect(listPollsFor(db, { id: mark.id, isAdmin: true }, now).map((p) => p.question)).toEqual(["Пицца в пятницу?"]);
+    expect(listPollsFor(db, mark, now)).toEqual([]);
+  });
+
+  it("чужие идущие опросы не вытесняют у не-админа его собственные из двадцатки", () => {
+    const { db, anya, mark } = stage();
+    for (let i = 0; i < 20; i += 1) createPoll(db, { createdBy: mark.id, question: `Чужой ${i}`, closesAt: null, recipientIds: [mark.id] });
+    expect(listPollsFor(db, anya, now).map((p) => p.question)).toEqual(["Пицца в пятницу?"]);
+  });
 });

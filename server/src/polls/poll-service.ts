@@ -192,12 +192,22 @@ export function pollView(db: Db, poll: Poll, viewer: Viewer, now: TeamClock): Po
   };
 }
 
-/** Последние двадцать — старше экрану не нужно: опрос живёт день-два. */
+/**
+ * Последние двадцать — старше экрану не нужно: опрос живёт день-два.
+ *
+ * Админу — ещё и все чужие идущие: закрыть чужой опрос он вправе
+ * (`canManage`), а право без кнопки на экране ничего не стоит. Закрытые чужие
+ * не показываются — это экран текущих дел, а не архив команды.
+ */
 export function listPollsFor(db: Db, viewer: Viewer, now: TeamClock): PollView[] {
   const mine = db.select({ pollId: pollRecipients.pollId }).from(pollRecipients)
     .where(eq(pollRecipients.employeeId, viewer.id)).all().map((r) => r.pollId);
   const rows = db.select().from(polls)
-    .where(or(eq(polls.createdBy, viewer.id), mine.length > 0 ? inArray(polls.id, mine) : undefined))
+    .where(or(
+      eq(polls.createdBy, viewer.id),
+      mine.length > 0 ? inArray(polls.id, mine) : undefined,
+      viewer.isAdmin ? and(isNull(polls.closedAt), isNull(polls.cancelledAt)) : undefined,
+    ))
     .orderBy(desc(polls.id)).limit(20).all();
   return rows.map((p) => pollView(db, p, viewer, now)).filter((v): v is PollView => v != null);
 }
