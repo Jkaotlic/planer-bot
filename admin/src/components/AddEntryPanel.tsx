@@ -5,6 +5,7 @@ import {
   CUSTOM_TIME_CATEGORIES,
   describeEntryRangePlan,
   absenceReplaceHint,
+  rewritesOutsideAbsence,
   eachDayIso,
   entryRangeHint,
   isAbsence,
@@ -459,7 +460,7 @@ export function AddEntryPanel({
             )}
             <div className="range-preview" data-testid="range-preview">
               Поставится {describeEntryRangePlan(plan)}.{" "}
-              {replacingEdited && existing ? absenceReplaceHint(existing.category, plan.replacedAbsence.length) : entryRangeHint(mode, replaceToggle)}
+              {replacingEdited && existing ? absenceReplaceHint(existing.category, plan.replacedAbsence.length, rewritesOutsideAbsence(plan.days, existing)) : entryRangeHint(mode, replaceToggle)}
             </div>
           </div>
         )}

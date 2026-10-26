@@ -339,6 +339,20 @@ describe("форма записи в мини-аппе — замена отсу
     expect(calls[0]).not.toHaveProperty("replaceAbsences");
   });
 
+  // «С/По» шире отпуска уходят перезаписью: смены в днях за ним перепишутся, а
+  // подсказка говорила только про отпуск (H10). Зеркало консоли.
+  it("«По» за правимым отпуском: подсказка говорит, что остальные дни перепишутся", async () => {
+    spyRange();
+    const el = await openEditOf(VACATION);
+    await setValue(kindSelect(el), "p:3");
+    const preview = () => el.querySelector('[data-testid="range-preview"]')!.textContent ?? "";
+    // В пределах отпуска перезаписывать нечего — и подсказка об этом молчит.
+    expect(preview()).not.toContain("Смены и дежурства в остальных днях перепишутся");
+
+    await setValue([...el.querySelectorAll<HTMLInputElement>('input[type="date"]')][1]!, day(12));
+    expect(preview()).toContain("Смены и дежурства в остальных днях перепишутся");
+  });
+
   it("отпуск, оставшийся отпуском, правится как раньше — одной записью", async () => {
     const calls = spyRange();
     const update = vi.spyOn(apiClient, "updateEntry").mockResolvedValue({ entry: VACATION, notified: { delivered: 0, intended: 0 } });
