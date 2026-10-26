@@ -391,6 +391,55 @@ describe("кнопки под подтверждением", () => {
     expect(after.filter((m) => m.chat_id === 222 && m.text.includes("Автоотправка"))).toHaveLength(0);
   });
 
+  // Кнопка под подтверждением живёт в чате вечно: второй тап или тап после
+  // рассылки слал админам ложное «Автоотправка выключена» и писал журнал о
+  // перемене, которой не было.
+  it("два тапа «не рассылать» подряд — одно письмо админам и одна строка журнала", async () => {
+    const { db, bot, api } = stage();
+    const round = await withLink(db, bot);
+    person(db, "Аня", 444, null, true);
+    const before = api.sent.length;
+
+    await tap(bot, 222, `collection:autooff:${round.id}`);
+    await tap(bot, 222, `collection:autooff:${round.id}`);
+
+    const rows = listRecentAudit(db, 50).filter((r) => r.type === "collection_updated");
+    expect(rows).toHaveLength(1);
+    const toAnya = api.sent.slice(before).filter((m) => m.chat_id === 444 && m.text.includes("Автоотправка"));
+    expect(toAnya).toHaveLength(1);
+    expect(api.answers.at(-1)).toBe("Автоотправка уже выключена.");
+  });
+
+  it("«не рассылать» под разосланным сбором — тот же ответ, что у «другого дня», без журнала и писем", async () => {
+    const { db, bot, api } = stage();
+    const round = await withLink(db, bot);
+    person(db, "Аня", 444, null, true);
+    // День автоотправки оставлен: проверка разосланности не должна держаться
+    // на пустом поле.
+    db.run(`update collections set send_count = 1 where id = ${round.id}` as never);
+    const before = api.sent.length;
+
+    await tap(bot, 222, `collection:autooff:${round.id}`);
+
+    expect(api.answers.at(-1)).toBe("Сбор уже разослан — второй раз бот не шлёт");
+    expect(listRecentAudit(db, 50).filter((r) => r.type === "collection_updated")).toHaveLength(0);
+    expect(api.sent.slice(before).filter((m) => m.chat_id === 444)).toHaveLength(0);
+  });
+
+  it("«не рассылать» под закрытым сбором — тот же ответ, что у «другого дня», без журнала и писем", async () => {
+    const { db, bot, api } = stage();
+    const round = await withLink(db, bot);
+    person(db, "Аня", 444, null, true);
+    db.run(`update collections set closed_at = 1 where id = ${round.id}` as never);
+    const before = api.sent.length;
+
+    await tap(bot, 222, `collection:autooff:${round.id}`);
+
+    expect(api.answers.at(-1)).toBe("Сбор закрыт или праздник прошёл");
+    expect(listRecentAudit(db, 50).filter((r) => r.type === "collection_updated")).toHaveLength(0);
+    expect(api.sent.slice(before).filter((m) => m.chat_id === 444)).toHaveLength(0);
+  });
+
   it("перенос из бота — тоже в журнал", async () => {
     const { db, bot } = stage();
     const round = await withLink(db, bot);
