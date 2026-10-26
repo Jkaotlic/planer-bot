@@ -1,5 +1,5 @@
 import type { Bot } from "grammy";
-import { eachDayIso, isAbsence, sickExtensionRuns, sickSpanIntersection, type SickApprovalRow, type SickSpan } from "@planer/shared";
+import { eachDayIso, isAbsence, sickExtensionRuns, sickSpanIntersection, sickSpanShort, type SickApprovalRow, type SickSpan } from "@planer/shared";
 import type { Db } from "../db/client";
 import type { Handover, Shift } from "../db/schema";
 import { getEmployeeById, listAdmins } from "../repo/employees";
@@ -11,11 +11,13 @@ import {
   deleteApprovalMessages,
   listApprovalMessages,
   listPendingSickLeaves,
+  listSickLeavesPendingSince,
   markApprovalRequested,
   restoreApprovedSpan,
   setApprovedSpan,
 } from "../repo/sick-approvals";
 import { listHandoversForEntry } from "../repo/handovers";
+import { addReminder, hasReminder } from "../repo/reminders";
 import { sendTracked } from "../bot/tracked-send";
 import { dayAfterLine } from "../schedule/day-summary";
 import { safeErrorMessage } from "../util/safe-error";
@@ -262,7 +264,7 @@ export async function editClosedRequest(deps: SickApprovalDeps, closed: ClosedRe
 
 /** The Telegram half of `finishApprovalMessages`, for a caller that took its snapshot of the rows earlier. */
 async function editApprovalMessages(
-  deps: SickApprovalDeps,
+  deps: Pick<SickApprovalDeps, "bot">,
   rows: readonly { chatId: number; messageId: number }[],
   finalText: string,
 ): Promise<void> {
@@ -444,4 +446,75 @@ export function listSickApprovals(db: Db): SickApprovalRow[] {
       handoverForced: sick.handoverForcedAt != null,
       ...(sick.approvedDate != null ? { approvedSpan: { date: sick.approvedDate, endDate: sick.approvedEndDate } } : {}),
     }));
+}
+
+/** How long a sick leave may wait for «ОК» before the admins are reminded once (owner's decision, spec item 15). */
+export const SICK_APPROVAL_REMIND_HOURS = 4;
+
+/**
+ * The mark carries the moment of the request: an extension asked later (`markApprovalRequested`
+ * writes a new `approvalRequestedAt`) is a new question, and a mark shared with the first round
+ * would keep it silent. `reminder_log` is unique on (entry, kind), so the moment goes into the kind.
+ */
+function remindKind(requestedAt: Date): string {
+  return `sick_approval_remind@${requestedAt.getTime()}`;
+}
+
+function reminderText(db: Db, sick: Shift, hours: number): string {
+  const name = sick.employeeId == null ? "Работник" : (nameOf(db, sick.employeeId) ?? "Работник");
+  const runs = extensionOf(sick);
+  // An extension waits only for its new days; naming the whole span would ask about approved ones again.
+  const subject = runs ? "Продление больничного" : "Больничный";
+  const dates = (runs ?? [{ date: sick.date, endDate: sick.endDate }]).map((run) => sickSpanShort(run.date, run.endDate)).join(", ");
+  return `⏳ ${subject} ${name} (${dates}) ждёт решения уже ${hours} ч.`;
+}
+
+/**
+ * One reminder to the admins about a sick leave nobody has decided on for
+ * `SICK_APPROVAL_REMIND_HOURS`: until the «ОК» the hand-over does not start, so a request that
+ * slipped by in the chat leaves the worker's shifts uncovered.
+ *
+ * Sent and tracked exactly like the request itself (see `requestApproval`): `listAdmins` +
+ * `sendTracked`, mutes ignored for the same reason, and every message id stored, so a decision
+ * takes the buttons off the reminder as well — a stale «ОК» tapped an hour later would only
+ * answer «уже подтверждён». The hours are the real age: after a restart the tick can find a
+ * request long past four hours, and «уже 4 ч» about a day-old one would be untrue.
+ *
+ * Once per request round (`remindKind`); delivered to nobody — no mark, the next tick retries.
+ * `at` is absolute time: `approvalRequestedAt` is a UTC moment, not team-clock time.
+ */
+export async function runSickApprovalReminderTick(db: Db, bot: Bot, at: Date = new Date()): Promise<number> {
+  let sent = 0;
+  const cutoff = new Date(at.getTime() - SICK_APPROVAL_REMIND_HOURS * 60 * 60 * 1000);
+  for (const sick of listSickLeavesPendingSince(db, cutoff)) {
+    try {
+      const requestedAt = sick.approvalRequestedAt!;
+      const kind = remindKind(requestedAt);
+      if (hasReminder(db, sick.id, kind)) continue;
+      const text = reminderText(db, sick, Math.floor((at.getTime() - requestedAt.getTime()) / (60 * 60 * 1000)));
+      let delivered = 0;
+      // Letters that went out after a decision had already closed the request: that decision
+      // edited only the letters recorded by then, so these are closed here (cf. `requestApproval`).
+      const late: { chatId: number; messageId: number }[] = [];
+      for (const admin of listAdmins(db)) {
+        if (admin.telegramUserId == null || admin.id === sick.employeeId) continue;
+        const messageId = await sendTracked(bot, admin.telegramUserId, text, sickApprovalKeyboard(sick.id));
+        if (messageId == null) continue;
+        delivered++;
+        // Synchronous check-and-record: a decision clears the rows before it edits them, so a
+        // letter recorded while the request is still pending is always reached by that decision.
+        if (getShift(db, sick.id)?.approvalRequestedAt != null) addApprovalMessage(db, sick.id, admin.telegramUserId, messageId);
+        else late.push({ chatId: admin.telegramUserId, messageId });
+      }
+      // The outcome itself is not known here (a reject deletes the row): neutral words, as in `requestApproval`.
+      await editApprovalMessages({ bot }, late, `${text}\n\nРешение уже принято`);
+      if (delivered === 0) continue;
+      // The row may be gone (rejected mid-loop): `reminder_log` references it, and there is nothing left to mark.
+      if (getShift(db, sick.id)) addReminder(db, sick.id, kind);
+      sent += delivered;
+    } catch (err) {
+      console.error(`runSickApprovalReminderTick: entry ${sick.id} skipped:`, safeErrorMessage(err));
+    }
+  }
+  return sent;
 }

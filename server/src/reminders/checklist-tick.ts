@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { InlineKeyboard, InputFile, type Bot } from "grammy";
-import { checklistHasContent, checklistText, checklistsDueToday, isAbsentOn } from "@planer/shared";
+import { checklistHasContent, checklistText, checklistsDueToday, clampTelegramText, isAbsentOn, linesWord } from "@planer/shared";
 import type { Config } from "../config";
 import type { Db } from "../db/client";
 import { activeChecklistItems, listMarksFor } from "../repo/checklist";
@@ -93,7 +93,7 @@ export async function runChecklistTick(
     // Без пунктов заголовок «— на сегодня:» и «Сделано 0 из 0» обещали бы список,
     // которого в сообщении нет: на экране это читается как поломка, а не как
     // инструкция. Поэтому в таком сообщении остаются имя, пояснение и файл.
-    const text = [
+    const full = [
       items.length > 0 ? `${list.name} — на сегодня:` : list.name,
       "",
       ...(settings.note ? [settings.note, ""] : []),
@@ -101,6 +101,18 @@ export async function runChecklistTick(
     ]
       .join("\n")
       .trimEnd();
+    // Письмо длиннее 4096 знаков Telegram отвергает целиком, а 400 ниже считается
+    // отказом «насовсем»: пояснение 1500 и два пункта с пояснениями по 1500 —
+    // и дежурный не получал чек-лист вовсе, ни в этот тик, ни в следующие (аудит
+    // 2026-10-26, H2). Поэтому письмо режется, а хвост говорит, где остальное.
+    //
+    // Хвост обещает мини-апп только при пунктах: экран отдаёт лишь списки с
+    // пунктами (`/api/my/checklist`), и туда же ведёт кнопка «☑️ Отметить» — она
+    // при пунктах есть всегда. Без пунктов звать некуда; через форму такое письмо
+    // и не собрать (пояснение ≤ `CHECKLIST_NOTE_MAX`), только старой записью.
+    const text = clampTelegramText(full, (n) =>
+      items.length > 0 ? `…и ещё ${linesWord(n)} — полностью в мини-аппе` : `…не вошло в письмо: ещё ${linesWord(n)}`,
+    );
     const kb = new InlineKeyboard();
     // «Отметить» — только когда есть что отмечать: карточка без пунктов пуста, и
     // кнопка обещала бы маршрут, которого нет — тот же довод, что и у `?screen=…`

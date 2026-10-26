@@ -80,3 +80,50 @@ describe("консоль: карточка опроса", () => {
     await waitFor(() => expect(cancel).toHaveBeenCalledWith(3));
   });
 });
+
+// Кнопка показывается ровно тогда, когда ручка её примет (`canRemindSilent`),
+// — иначе карточка обещала бы напоминание, которое не уйдёт.
+describe("консоль: «🔔 Напомнить молчащим»", () => {
+  const REMIND = "🔔 Напомнить молчащим";
+
+  it("управляющий, опрос идёт, молчащие есть — кнопка шлёт и пишет «Напомнил: D из N»", async () => {
+    const remind = vi.spyOn(apiClient, "remindPollSilent").mockResolvedValue({ delivered: 1, silent: 2, unreachable: ["Марк"] });
+    const el = await mount(PollCard, { poll: pollView() });
+    await click(button(el, REMIND));
+    await waitFor(() => expect(card(el).querySelector('[role="status"]')?.textContent).toBe("Напомнил: 1 из 2. Не дошло: Марк"));
+    expect(remind).toHaveBeenCalledWith(3);
+  });
+
+  it("нет кнопки: не управляющий, опрос закрыт, все ответили", async () => {
+    for (const over of [
+      { canManage: false, isCreator: false },
+      { open: false },
+      { tally: { for: ["Игорь", "Марк"], against: [], abstain: [], silent: [] } },
+    ]) {
+      const el = await mount(PollCard, { poll: pollView(over) });
+      expect(maybeButton(el, REMIND)).toBeUndefined();
+      await unmount();
+    }
+  });
+
+  it("отказ — текстом в карточке, опрос перечитан: закрытый уже без кнопки", async () => {
+    vi.spyOn(apiClient, "remindPollSilent").mockRejectedValue(new Error("Опрос закрыт — напоминать уже не о чем."));
+    const getPoll = vi.spyOn(apiClient, "getPoll").mockResolvedValue(pollView({ open: false }));
+    const el = await mount(PollCard, { poll: pollView() });
+    await click(button(el, REMIND));
+    await waitFor(() => expect(card(el).querySelector('[role="alert"]')?.textContent).toBe("Опрос закрыт — напоминать уже не о чем."));
+    expect(getPoll).toHaveBeenCalledWith(3);
+    expect(maybeButton(el, REMIND)).toBeUndefined();
+  });
+
+  it("новое действие после напоминания убирает старую строку «Напомнил: …»", async () => {
+    vi.spyOn(apiClient, "remindPollSilent").mockResolvedValue({ delivered: 2, silent: 2, unreachable: [] });
+    vi.spyOn(apiClient, "votePoll").mockResolvedValue(pollView({ myChoice: "for" }));
+    const el = await mount(PollCard, { poll: pollView() });
+    await click(button(el, REMIND));
+    await waitFor(() => expect(card(el).querySelector('[role="status"]')?.textContent).toBe("Напомнил: 2 из 2"));
+    await click(button(el, "👍 За"));
+    await waitFor(() => expect(button(el, "👍 За").getAttribute("aria-pressed")).toBe("true"));
+    expect(card(el).querySelector('[role="status"]')).toBeNull();
+  });
+});

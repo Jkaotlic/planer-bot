@@ -158,7 +158,15 @@ export const createEntrySchema = baseEntry.superRefine((v, ctx) => {
  * никто не трогал.
  */
 export const updateEntrySchema = baseEntry
-  .extend({ location: z.string().nullish(), title: z.string().nullish(), note: z.string().nullish() })
+  .extend({
+    // Без `.default("shift")` базовой схемы: в zod 4 умолчание срабатывает и под
+    // `.partial()`, и правка одной заметки отпуска молча превращала бы его в смену.
+    // Правка шлёт только то, что меняет; категорию без поля берём из записи.
+    category: entryCategorySchema,
+    location: z.string().nullish(),
+    title: z.string().nullish(),
+    note: z.string().nullish(),
+  })
   .partial();
 
 const TEXT_CAPS = [

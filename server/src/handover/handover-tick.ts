@@ -35,8 +35,14 @@ export async function forceUrgentSickHandovers(deps: HandoverTickDeps, nowMs: nu
   const { db, config } = deps;
   const startsBefore = nowMs + config.handoverEscalateHours * HOUR_MS;
   let forced = 0;
-  for (const sick of listPendingSickLeavesWithin(db, teamDateAt(nowMs, config.teamTz), teamDateAt(startsBefore, config.teamTz))) {
+  for (const listed of listPendingSickLeavesWithin(db, teamDateAt(nowMs, config.teamTz), teamDateAt(startsBefore, config.teamTz))) {
     try {
+      // Список прочитан до первой рассылки, а каждая рассылка ждёт Telegram: за это время
+      // админ мог отклонить или одобрить больничный, работник — укоротить его. Старая строка
+      // попросила бы коллег подменить по дням, которые уже не больничные, — поэтому дальше
+      // только свежая, и только пока она всё ещё ждёт «ОК».
+      const sick = getShift(db, listed.id);
+      if (!sick || sick.category !== "sick_leave" || sick.approvalRequestedAt == null) continue;
       const owner = sick.employeeId == null ? undefined : getEmployeeById(db, sick.employeeId);
       // Observers hand nothing over — the same gate as the self-entry route.
       if (!owner || owner.isObserver) continue;
@@ -51,7 +57,7 @@ export async function forceUrgentSickHandovers(deps: HandoverTickDeps, nowMs: nu
       }
       forced += made.length;
     } catch (err) {
-      console.error(`forceUrgentSickHandovers: sick leave ${sick.id} skipped:`, safeErrorMessage(err));
+      console.error(`forceUrgentSickHandovers: sick leave ${listed.id} skipped:`, safeErrorMessage(err));
     }
   }
   return forced;

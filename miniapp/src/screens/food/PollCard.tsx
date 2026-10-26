@@ -1,27 +1,32 @@
 import { useState } from "react";
-import { POLL_CHOICE_LABEL, POLL_CHOICES, cancelPollQuestion, closePollQuestion, pollStatusLabel, pollTallyLines } from "@planer/shared";
+import {
+  POLL_CHOICE_LABEL, POLL_CHOICES, canRemindSilent, cancelPollQuestion, closePollQuestion, pollRemindResultText, pollStatusLabel, pollTallyLines,
+} from "@planer/shared";
 import { apiClient, type PollView } from "../../api/client";
 import { ActionButton, Card } from "../../ui";
 import { ConfirmButton } from "../../components/ConfirmButton";
 
-/** Опрос карточкой: голос, итог поимённо, а запускающему — «Закрыть» и «Отменить». */
+/** Опрос карточкой: голос, итог поимённо, а запускающему — «Напомнить молчащим», «Закрыть» и «Отменить». */
 export function PollCard({ poll: initial }: { poll: PollView }) {
   const [poll, setPoll] = useState(initial);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [remindResult, setRemindResult] = useState<string | null>(null);
 
-  async function run(action: () => Promise<PollView>) {
+  /** Отказ любого действия — повод перечитать опрос, как в `OrderScreen`: сервер мог
+   *  закрыть его тиком, запускающий — отменить между рендером и тапом. Раньше гасили
+   *  кнопки только по тексту «Опрос закрыт.», и отменённый опрос оставлял их
+   *  активными до перезагрузки списка. Отказ перечитывания не страшен: прежняя
+   *  карточка и текст ошибки остаются. */
+  async function attempt(action: () => Promise<void>) {
     setBusy(true);
     setError(null);
+    // Строка «Напомнил: …» — итог прошлого нажатия; после нового действия она устарела.
+    setRemindResult(null);
     try {
-      setPoll(await action());
+      await action();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не получилось");
-      // Любой отказ — повод перечитать опрос, как в `OrderScreen`: сервер мог
-      // закрыть его тиком, запускающий — отменить между рендером и тапом.
-      // Раньше гасили кнопки только по тексту «Опрос закрыт.», и отменённый
-      // опрос оставлял их активными до перезагрузки списка. Отказ
-      // перечитывания не страшен: прежняя карточка и текст ошибки остаются.
       try {
         setPoll(await apiClient.getPoll(poll.id));
       } catch {
@@ -31,6 +36,10 @@ export function PollCard({ poll: initial }: { poll: PollView }) {
       setBusy(false);
     }
   }
+
+  const run = (action: () => Promise<PollView>) => attempt(async () => setPoll(await action()));
+  /** Напоминание отдаёт не опрос, а сколько дошло — как дожим у `OrderScreen`. */
+  const remind = () => attempt(async () => setRemindResult(pollRemindResultText(await apiClient.remindPollSilent(poll.id))));
 
   const status = pollStatusLabel(poll);
   return (
@@ -48,6 +57,10 @@ export function PollCard({ poll: initial }: { poll: PollView }) {
       <div style={{ fontSize: "var(--app-text-meta)" }}>
         {pollTallyLines(poll.tally).map((line) => <div key={line}>{line}</div>)}
       </div>
+      {canRemindSilent(poll) && (
+        <ActionButton compact disabled={busy} onClick={remind}>🔔 Напомнить молчащим</ActionButton>
+      )}
+      {remindResult && <div style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)" }}>{remindResult}</div>}
       {poll.canManage && poll.open && (
         <div style={{ display: "flex", gap: 8 }}>
           <ConfirmButton label="Закрыть и разослать итог" question={closePollQuestion(poll)} confirmLabel="Закрыть"

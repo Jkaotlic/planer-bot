@@ -6,7 +6,7 @@ import { eq } from "drizzle-orm";
 import { employees, shifts, auditLog, handovers as handoversTable, type Shift } from "../db/schema";
 import { getShift, deleteShift } from "../repo/shifts";
 import { addDecline, createHandover, getHandover, listDeclines, listHandoversForEntry } from "../repo/handovers";
-import { startHandovers, offerTo, fanOut, declineHandover, takeHandover, cancelHandoversForEntry, detachHandoversFromEntry, escalate } from "./handover-service";
+import { startHandovers, offerTo, fanOut, declineHandover, takeHandover, cancelHandoversForEntry, detachHandoversFromEntry, escalate, moveHandoversToSplitPiecesDb } from "./handover-service";
 import { createHandoverMessenger } from "./handover-messenger";
 import { createEmployee, linkTelegramAccount, setEmployeeRestrictions } from "../repo/employees";
 import { setNoticeMuted } from "../repo/notice-prefs";
@@ -246,12 +246,107 @@ describe("going straight to the fan-out", () => {
     shift(db, anya, "2026-08-12");
     const [handover] = await startHandovers(deps(db), { sickEntry: sick, employeeId: anya });
     await offerTo(deps(db), handover!.id, igor);
-    await declineHandover(deps(db), handover!.id, igor);
+    // Отказ записан, а веер ещё не ушёл — тот, что пустит тик или «Спросить всех».
+    addDecline(db, handover!.id, igor);
     sent = [];
 
     await fanOut(deps(db), handover!.id);
 
     expect(sent.map((m) => m.to)).toEqual([`employee:${mark}`]);
+  });
+
+  it("второй веер по уже разосланной передаче никому не пишет — всех уже спросили", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    person(db, "Игорь");
+    person(db, "Марк");
+    const sick = sickLeave(db, anya, "2026-08-12", "2026-08-12");
+    shift(db, anya, "2026-08-12");
+    const [handover] = await startHandovers(deps(db), { sickEntry: sick, employeeId: anya });
+    let fans = 0;
+    const counting = { ...deps(db), messenger: { ...deps(db).messenger, fan: async () => void (fans += 1) } };
+
+    const first = await fanOut(counting, handover!.id);
+    const second = await fanOut(counting, handover!.id);
+
+    expect(fans).toBe(1);
+    expect([first, second]).toEqual([{ ok: true, sent: true }, { ok: true, sent: false }]);
+    expect(auditTypes(db).filter((t) => t === "handover_fanned")).toHaveLength(1);
+  });
+
+  it("передача, эскалированная без веера (свободных не было), — «Спросить всех» рассылает её, когда свободный появился", async () => {
+    // Эскалация «свободных нет» ставит `fanned`, но никому не пишет. Если веер считать
+    // по статусу, «Спросить всех» по ней стал бы молчаливым «да» — смена так и висит.
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    const sick = sickLeave(db, anya, "2026-08-12", "2026-08-12");
+    shift(db, anya, "2026-08-12");
+    const [handover] = await startHandovers(deps(db), { sickEntry: sick, employeeId: anya });
+    expect(getHandover(db, handover!.id)?.status).toBe("fanned");
+    const igor = person(db, "Игорь");
+    const fans: number[][] = [];
+    const counting = { ...deps(db), messenger: { ...deps(db).messenger, fan: async (ids: readonly number[]) => void fans.push([...ids]) } };
+
+    const first = await fanOut(counting, handover!.id);
+    const second = await fanOut(counting, handover!.id);
+
+    expect(fans).toEqual([[igor]]);
+    expect([first, second]).toEqual([{ ok: true, sent: true }, { ok: true, sent: false }]);
+  });
+
+  it("веер, которому некого спросить, говорит «не отправлено» — и не закрывает дорогу следующему", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    const igor = person(db, "Игорь");
+    const sick = sickLeave(db, anya, "2026-08-12", "2026-08-12");
+    shift(db, anya, "2026-08-12");
+    const [handover] = await startHandovers(deps(db), { sickEntry: sick, employeeId: anya });
+    // Игорь отказался раньше — круг пуст.
+    addDecline(db, handover!.id, igor);
+    const mark = person(db, "Марк");
+    addDecline(db, handover!.id, mark);
+    let fans = 0;
+    const counting = { ...deps(db), messenger: { ...deps(db).messenger, fan: async () => void (fans += 1) } };
+
+    expect(await fanOut(counting, handover!.id)).toEqual({ ok: true, sent: false });
+    expect(fans).toBe(0);
+    expect(getHandover(db, handover!.id)?.status).toBe("fanned");
+
+    // Освободилась Даша — веера ещё не было, значит, он ещё впереди.
+    person(db, "Даша");
+    expect(await fanOut(counting, handover!.id)).toEqual({ ok: true, sent: true });
+    expect(fans).toBe(1);
+  });
+
+  it("передачу, которую после веера предложили лично, снова можно разослать — это новый круг", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    const igor = person(db, "Игорь");
+    person(db, "Марк");
+    const sick = sickLeave(db, anya, "2026-08-12", "2026-08-12");
+    shift(db, anya, "2026-08-12");
+    const [handover] = await startHandovers(deps(db), { sickEntry: sick, employeeId: anya });
+    let fans = 0;
+    const counting = { ...deps(db), messenger: { ...deps(db).messenger, fan: async () => void (fans += 1) } };
+    await fanOut(counting, handover!.id);
+    await offerTo(counting, handover!.id, igor);
+
+    expect(await fanOut(counting, handover!.id)).toEqual({ ok: true, sent: true });
+    expect(fans).toBe(2);
+  });
+
+  it("веер по закрытой передаче отказывает словами и никому не пишет", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    const igor = person(db, "Игорь");
+    const sick = sickLeave(db, anya, "2026-08-12", "2026-08-12");
+    shift(db, anya, "2026-08-12");
+    const [handover] = await startHandovers(deps(db), { sickEntry: sick, employeeId: anya });
+    await takeHandover(deps(db), handover!.id, igor, TODAY);
+    sent = [];
+
+    expect(await fanOut(deps(db), handover!.id)).toEqual({ ok: false, reason: "Передача уже закрыта" });
+    expect(sent).toEqual([]);
   });
 });
 
@@ -288,6 +383,29 @@ describe("declining", () => {
     await declineHandover(deps(db), handover!.id, igor);
 
     expect(sent.map((m) => m.to)).toEqual([`employee:${mark}`]);
+  });
+
+  it("тик, сработавший, пока бот отвечал на «Не могу», — веер уходит один раз (H8)", async () => {
+    // Воспроизведение из аудита: ответ на нажатие ждёт Telegram, и в эту паузу тик
+    // успевает разослать ту же передачу; после ответа «Не могу» рассылало её второй раз.
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    const igor = person(db, "Игорь");
+    person(db, "Марк");
+    const sick = sickLeave(db, anya, "2026-08-12", "2026-08-12");
+    shift(db, anya, "2026-08-12");
+    const [handover] = await startHandovers(deps(db), { sickEntry: sick, employeeId: anya });
+    await offerTo(deps(db), handover!.id, igor);
+    let fans = 0;
+    const counting = { ...deps(db), messenger: { ...deps(db).messenger, fan: async () => void (fans += 1) } };
+
+    const result = await declineHandover(counting, handover!.id, igor, async () => {
+      await fanOut(counting, handover!.id);
+    });
+
+    expect(result.ok).toBe(true);
+    expect(fans).toBe(1);
+    expect(getHandover(db, handover!.id)?.status).toBe("fanned");
   });
 
   it("refuses a decline on a handover that is already resolved", async () => {
@@ -375,6 +493,58 @@ describe("taking a shift", () => {
 
     expect(result.ok).toBe(false);
     expect(getShift(db, work.id)?.employeeId).toBe(anya);
+  });
+
+  it("«Беру» отказывает тому, кто в это утро ещё на ночной с вечера накануне (H7)", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    const igor = person(db, "Игорь");
+    // На 13-е, а не на 12-е: часы теста стоят на 12-м 08:00, и смена 12-го с
+    // 07:00 отказала бы раньше — «уже идёт».
+    const sick = sickLeave(db, anya, "2026-08-13", "2026-08-13");
+    const work = shift(db, anya, "2026-08-13", "07:00", "16:00");
+    const [handover] = await startHandovers(deps(db), { sickEntry: sick, employeeId: anya });
+    shift(db, igor, "2026-08-12", "22:00", "08:00");
+
+    const result = await takeHandover(deps(db), handover!.id, igor, TODAY);
+
+    expect(result).toEqual({ ok: false, reason: "У тебя в это время уже стоит: Ср 12 авг · 22:00–08:00 · День" });
+    expect(getShift(db, work.id)?.employeeId).toBe(anya);
+  });
+
+  it("«Беру» в отпуске — отказ называет отпуск, а не «свою смену»", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    const igor = person(db, "Игорь");
+    const sick = sickLeave(db, anya, "2026-08-13", "2026-08-13");
+    const work = shift(db, anya, "2026-08-13", "09:00", "18:00");
+    const [handover] = await startHandovers(deps(db), { sickEntry: sick, employeeId: anya });
+    db.insert(shifts).values({ date: "2026-08-13", endDate: "2026-08-15", category: "vacation", employeeId: igor }).run();
+
+    const result = await takeHandover(deps(db), handover!.id, igor, TODAY);
+
+    expect(result).toEqual({ ok: false, reason: "У тебя в это время уже стоит: Чт 13 авг – Сб 15 авг · весь день · Отпуск" });
+    expect(getShift(db, work.id)?.employeeId).toBe(anya);
+  });
+
+  it("отказ «Беру» с длинной подписью мешающей записи влезает в ответ кнопки (200 символов)", async () => {
+    // Подпись записи — до 200 символов (ENTRY_TITLE_MAX), а ответ на нажатие
+    // Telegram больше 200 не примет: человек не увидел бы вообще ничего.
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    const igor = person(db, "Игорь");
+    const sick = sickLeave(db, anya, "2026-08-13", "2026-08-13");
+    shift(db, anya, "2026-08-13", "09:00", "18:00");
+    const [handover] = await startHandovers(deps(db), { sickEntry: sick, employeeId: anya });
+    db.insert(shifts).values({ date: "2026-08-13", start: "10:00", end: "12:00", category: "offsite", title: "Я".repeat(200), employeeId: igor }).run();
+
+    const result = await takeHandover(deps(db), handover!.id, igor, TODAY);
+
+    expect(result.ok).toBe(false);
+    const reason = result.ok ? "" : result.reason;
+    expect(Array.from(reason).length).toBe(200);
+    expect(reason.startsWith("У тебя в это время уже стоит: Чт 13 авг · 10:00–12:00 · ЯЯЯ")).toBe(true);
+    expect(reason.endsWith("Я…")).toBe(true);
   });
 
   it("refuses a handover that is no longer open, whatever closed it", async () => {
@@ -898,5 +1068,40 @@ describe("escalate: имена отказавшихся — одним запр�
 
     expect(four.letter).toContain("Отказались: Марк, Игорь, Вера, Олег.");
     expect(four.reads).toBe(one.reads);
+  });
+});
+
+describe("разрез больничного: передача переходит на отколотый кусок", () => {
+  // Многодневное дежурство, которое покрывает и первый кусок (он сохраняет id), и
+  // отколотый. Через диапазон так разрезать нельзя — вырезанный день лёг бы на само
+  // дежурство и переписал его, — но функция не должна полагаться на это: перевешенная
+  // на отколотый кусок передача погасла бы при его правке, хотя первый кусок
+  // по-прежнему покрывает дежурство.
+  it("дежурство, которое ещё покрывает первый кусок, остаётся на старой строке", () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    const sick = sickLeave(db, anya, "2026-08-12", "2026-08-13");
+    const piece = sickLeave(db, anya, "2026-08-15", "2026-08-16");
+    const duty = db.insert(shifts).values({
+      date: "2026-08-13", endDate: "2026-08-15", start: "09:00", end: "18:00", category: "duty", title: "Неделя", employeeId: anya,
+    }).returning().get();
+    const handover = createHandover(db, { shiftId: duty.id, fromEmployeeId: anya, sickEntryId: sick.id, status: "fanned" });
+
+    moveHandoversToSplitPiecesDb(db, sick.id, sick, [piece]);
+
+    expect(getHandover(db, handover.id)!.sickEntryId).toBe(sick.id);
+  });
+
+  it("смена только в днях куска переходит на кусок", () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    const sick = sickLeave(db, anya, "2026-08-12", "2026-08-13");
+    const piece = sickLeave(db, anya, "2026-08-15", "2026-08-16");
+    const work = shift(db, anya, "2026-08-15");
+    const handover = createHandover(db, { shiftId: work.id, fromEmployeeId: anya, sickEntryId: sick.id, status: "fanned" });
+
+    moveHandoversToSplitPiecesDb(db, sick.id, sick, [piece]);
+
+    expect(getHandover(db, handover.id)!.sickEntryId).toBe(piece.id);
   });
 });

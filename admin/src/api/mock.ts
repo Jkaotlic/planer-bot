@@ -1,5 +1,5 @@
 import { createEmployeesMock, createFoodMock, createReadMock } from "@planer/client";
-import { recipientGroupInputSchema, recipientGroupPatchSchema, RECIPIENT_GROUPS_MAX } from "@planer/shared";
+import { ASSIGN_REFUSAL_TEXT, entriesClash, entryLineOf, takesPartInAssignment, weekendBusyRefusal, recipientGroupInputSchema, recipientGroupPatchSchema, RECIPIENT_GROUPS_MAX } from "@planer/shared";
 import type { AdminShortfall, CoverageAcks, CalendarDayDto, CalendarDayMarkResult, EntryCategory, RecipientGroupView, SickApprovalRow } from "@planer/shared";
 import type {
   AdminSettings,
@@ -85,7 +85,9 @@ const SEED_EMPLOYEES: readonly Employee[] = [
   { id: 2, displayName: "Игорь Петров", isAdmin: false, isActive: true, telegramUserId: 100002, birthDate: "08-05", preferredName: null, address: "Игорь Петров", excludedFromAssignment: false, excludedFromSwaps: false, isObserver: false, selfScheduleEnabled: false, remindersEnabled: true },
   { id: 3, displayName: "Марк Волков", isAdmin: false, isActive: true, telegramUserId: null, birthDate: null, preferredName: null, address: "Марк Волков", excludedFromAssignment: false, excludedFromSwaps: false, isObserver: false, selfScheduleEnabled: false, remindersEnabled: true },
   { id: 4, displayName: "Даша Кузнецова", isAdmin: false, isActive: true, telegramUserId: 100004, birthDate: "12-31", preferredName: null, address: "Даша Кузнецова", excludedFromAssignment: false, excludedFromSwaps: false, isObserver: false, selfScheduleEnabled: false, remindersEnabled: true },
-  { id: 5, displayName: "Олег Соколов", isAdmin: false, isActive: true, telegramUserId: 100005, birthDate: null, preferredName: null, address: "Олег Соколов", excludedFromAssignment: false, excludedFromSwaps: false, isObserver: false, selfScheduleEnabled: false, remindersEnabled: true },
+  // Олег заблокировал бота — без него в DEV не видно ни метки «🚫» в карточке,
+  // ни второй причины в чипе «Не слышат бота» (первая — Марк без Telegram).
+  { id: 5, displayName: "Олег Соколов", isAdmin: false, isActive: true, telegramUserId: 100005, birthDate: null, preferredName: null, address: "Олег Соколов", excludedFromAssignment: false, excludedFromSwaps: false, isObserver: false, selfScheduleEnabled: false, remindersEnabled: true, botBlockedAt: "2026-10-12T09:00:00.000Z" },
   { id: 6, displayName: "Света Орлова", isAdmin: false, isActive: false, telegramUserId: 100006, birthDate: null, preferredName: null, address: "Света Орлова", excludedFromAssignment: false, excludedFromSwaps: false, isObserver: false, selfScheduleEnabled: false, remindersEnabled: true },
 ];
 
@@ -573,24 +575,63 @@ export async function mockPostSlot(input: NewSlotInput): Promise<VacantSlot & { 
 }
 
 let nextAssignmentId = 900;
+/** Назначение → его запись в графике мока, чтобы снятие убирало ровно её. */
+const WEEKEND_ENTRY_OF = new Map<number, number>();
 
+/**
+ * Как сервер (`assignSlot`): те же проверки в том же порядке и те же фразы
+ * (`ASSIGN_REFUSAL_TEXT`, `weekendBusyRefusal` + `entryLineOf`), и запись
+ * «Работа в выходной» в графике. Без этого dev-мок молча ставил человека поверх
+ * его смены, а ветки отказа на экране нельзя было увидеть, не поднимая сервер.
+ * Календаря мок не ведёт, поэтому `not_weekend` здесь не бывает.
+ */
 export async function mockAssignSlot(slotId: number, employeeId: number): Promise<void> {
   await delay(250);
-  const entry = WEEKEND_SLOTS.find((s) => s.slot.id === slotId);
-  if (!entry || entry.assignees.some((a) => a.employeeId === employeeId)) return;
+  const view = WEEKEND_SLOTS.find((s) => s.slot.id === slotId);
+  if (!view) throw new Error(ASSIGN_REFUSAL_TEXT.not_found);
+  if (view.slot.status === "closed") throw new Error(ASSIGN_REFUSAL_TEXT.not_open);
+  if (view.slot.date < toISODate(new Date())) throw new Error(ASSIGN_REFUSAL_TEXT.slot_passed);
+  const person = EMPLOYEES.find((e) => e.id === employeeId);
+  if (!person?.isActive) throw new Error(ASSIGN_REFUSAL_TEXT.not_active);
+  if (!takesPartInAssignment(person)) throw new Error(ASSIGN_REFUSAL_TEXT.excluded);
+  if (!view.interested.some((i) => i.employeeId === employeeId)) throw new Error(ASSIGN_REFUSAL_TEXT.not_interested);
+  // Повторное «Назначить» — ничего не меняет, как на сервере.
+  if (view.assignees.some((a) => a.employeeId === employeeId)) return;
+  // Отпуск — пометка, а не запрет (решение 2026-07-30); смена, включая ночь накануне, — запрет.
+  const clash = ENTRIES.find((s) => s.employeeId === employeeId && !isAbsence(s.category) && entriesClash(s, view.slot));
+  if (clash) throw new Error(weekendBusyRefusal(nameOf(employeeId), entryLineOf(clash)));
+
+  const work = entry({
+    date: view.slot.date,
+    start: view.slot.start,
+    end: view.slot.end,
+    endDate: null,
+    category: "weekend_work",
+    title: view.slot.title ?? "Работа в выходной",
+    location: view.slot.location,
+    employeeId,
+  });
+  ENTRIES.push(work);
+  const assignmentId = nextAssignmentId++;
+  WEEKEND_ENTRY_OF.set(assignmentId, work.id);
   // The slot stays open — it may need more than one person.
-  entry.assignees.push({ assignmentId: nextAssignmentId++, employeeId, name: nameOf(employeeId), status: "offered" });
+  view.assignees.push({ assignmentId, employeeId, name: nameOf(employeeId), status: "offered" });
   // Mirror the real flow's eventual outcome for the demo ledger.
-  const hours = durationHoursOf(entry.slot.start, entry.slot.end);
-  PAYROLL.push({ employeeId, employeeName: nameOf(employeeId), date: entry.slot.date, hours });
+  const hours = durationHoursOf(view.slot.start, view.slot.end);
+  PAYROLL.push({ employeeId, employeeName: nameOf(employeeId), date: view.slot.date, hours });
 }
 
 export async function mockUnassignSlot(assignmentId: number): Promise<void> {
   await delay(200);
-  for (const entry of WEEKEND_SLOTS) {
-    const i = entry.assignees.findIndex((a) => a.assignmentId === assignmentId);
+  for (const view of WEEKEND_SLOTS) {
+    const i = view.assignees.findIndex((a) => a.assignmentId === assignmentId);
     if (i !== -1) {
-      entry.assignees.splice(i, 1);
+      view.assignees.splice(i, 1);
+      // Как сервер: снятие убирает и запись из графика.
+      const entryId = WEEKEND_ENTRY_OF.get(assignmentId);
+      const at = ENTRIES.findIndex((s) => s.id === entryId);
+      if (at !== -1) ENTRIES.splice(at, 1);
+      WEEKEND_ENTRY_OF.delete(assignmentId);
       return;
     }
   }

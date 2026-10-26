@@ -92,6 +92,15 @@ describe("swap service", () => {
     expect(mirrored).toEqual({ ok: false, reason: "mirror" });
   });
 
+  // Характеризация к H7 (аудит 2026-10-26): обмен свою занятость меряет по ВСЕМ
+  // сменам человека с часами, а не по дням обмена, поэтому ночь накануне видит и
+  // без `busyWith`. Тест держит это свойство, чтобы обмен не отстал от передач.
+  it("ночь накануне до 09:00 мешает второй стороне взять утро 08:00–17:00", () => {
+    const { db, a, b, sa, sb } = setup();
+    createShift(db, { date: "2026-07-09", start: "22:00", end: "09:00", employeeId: b.id });
+    expect(createSwap(db, { fromEmployeeId: a.id, fromShiftId: sa.id, toShiftId: sb.id }, NOW).ok).toBe(false);
+  });
+
   it("createSwap allows the mirror once the original is no longer pending", () => {
     const { db, a, b, sa, sb } = setup();
     const first = createSwap(db, { fromEmployeeId: a.id, fromShiftId: sa.id, toShiftId: sb.id }, NOW);

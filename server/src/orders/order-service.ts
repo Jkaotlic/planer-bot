@@ -47,11 +47,21 @@ export function getOrder(db: Db, id: number): FoodOrder | undefined {
   return db.select().from(foodOrders).where(eq(foodOrders.id, id)).get();
 }
 
+/**
+ * Адресаты заказа — все, включая архивированных после рассылки, с флагом
+ * `isActive`.
+ *
+ * В отличие от `pollRecipientRows` архивный здесь не отсеивается: его позиции
+ * уже в заказе, еда на него куплена, и запускающему нужно видеть, кто её
+ * должен. Отсеивает рассылка (`order-messenger`): писем ушедшему из команды
+ * больше нет.
+ */
 export function orderRecipientRows(db: Db, orderId: number) {
   return db.select({
     employeeId: foodOrderRecipients.employeeId,
     displayName: employees.displayName,
     telegramUserId: employees.telegramUserId,
+    isActive: employees.isActive,
     messageId: foodOrderRecipients.messageId,
   }).from(foodOrderRecipients)
     .innerJoin(employees, eq(employees.id, foodOrderRecipients.employeeId))

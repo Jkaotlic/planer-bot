@@ -412,5 +412,70 @@ describe("runChecklistTick", () => {
 
       expect(sent).toHaveLength(1);
     });
+
+    /**
+     * Аудит 2026-10-26, H2: пояснение 1500 знаков и два пункта с пояснениями по
+     * 1500 — письмо длиннее 4096, Telegram отвечал 400, отказ считался «насовсем»,
+     * и дежурный не получал чек-лист ни в этот тик, ни в следующие.
+     */
+    describe("длиннее предела Telegram", () => {
+      /** Заглушка ведёт себя как Telegram: длиннее 4096 — 400 «message is too long». */
+      function strictBot() {
+        const calls: { text: string; buttons: string[] }[] = [];
+        const bot = {
+          api: {
+            sendMessage: vi.fn(async (_to: number, text: string, extra?: { reply_markup?: { inline_keyboard: { text: string }[][] } }) => {
+              if (text.length > 4096) throw refusal(400, "Bad Request: message is too long");
+              calls.push({ text, buttons: (extra?.reply_markup?.inline_keyboard ?? []).flat().map((b) => b.text) });
+            }),
+            sendDocument: vi.fn(async () => {}),
+          },
+        };
+        return { bot: bot as unknown as Bot, calls };
+      }
+
+      it("с пунктами — письмо доходит обрезанным, хвост ведёт в мини-апп, кнопка «Отметить» есть", async () => {
+        const { db, list } = stage({ items: [] });
+        updateChecklist(db, list.id, { note: "п".repeat(1500) });
+        for (const title of ["Свет", "Окна"]) {
+          const item = createChecklistItem(db, list.id, title);
+          updateChecklistItem(db, item.id, { note: "о".repeat(1500) });
+        }
+        const { bot, calls } = strictBot();
+        const failing = vi.spyOn(console, "error").mockImplementation(() => {});
+
+        expect(await runChecklistTick(db, bot, config, { date: TODAY, time: "07:05" })).toBe(1);
+        failing.mockRestore();
+        expect(calls).toHaveLength(1);
+        const { text, buttons } = calls[0]!;
+        expect(text.length).toBeLessThanOrEqual(4000);
+        // Скрыты пояснение «Окон» и «Сделано 0 из 2.»; пустая строка между ними не в счёт.
+        expect(text.endsWith(`◻️ Свет\n    ${"о".repeat(1500)}\n◻️ Окна\n…и ещё 2 строки — полностью в мини-аппе`)).toBe(true);
+        expect(buttons).toContain("☑️ Отметить");
+      });
+
+      /**
+       * Без пунктов мини-апп чек-лист не показывает вовсе (`/api/my/checklist`
+       * отдаёт только списки с пунктами), поэтому хвост не зовёт туда и кнопки не
+       * даёт: обещал бы экран, которого нет. Через форму такое письмо не
+       * собрать (пояснение ≤ 2000), но старая запись или правка в базе — могут.
+       */
+      it("без пунктов — письмо доходит обрезанным и не обещает мини-апп", async () => {
+        const { db, list } = stage({ items: [] });
+        updateChecklist(db, list.id, { note: ["п".repeat(3000), "р".repeat(3000)].join("\n") });
+        const { bot, calls } = strictBot();
+        const failing = vi.spyOn(console, "error").mockImplementation(() => {});
+
+        expect(await runChecklistTick(db, bot, config, { date: TODAY, time: "07:05" })).toBe(1);
+        failing.mockRestore();
+        expect(calls).toHaveLength(1);
+        const { text, buttons } = calls[0]!;
+        expect(text.length).toBeLessThanOrEqual(4000);
+        expect(text).toContain("п".repeat(3000));
+        expect(text.endsWith("\n…не вошло в письмо: ещё 1 строка")).toBe(true);
+        expect(text).not.toContain("мини-апп");
+        expect(buttons).toEqual([]);
+      });
+    });
   });
 });

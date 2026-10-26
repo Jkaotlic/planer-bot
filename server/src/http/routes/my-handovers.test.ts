@@ -191,7 +191,14 @@ describe("POST /api/my/handovers/:id/skip", () => {
     );
 
     expect(res.status).toBe(200);
+    // Ответ различает «спросили» и «спрашивать было некого» — экран не скажет «отправлено» зря.
+    expect(await res.json()).toEqual({ ok: true, sent: true });
     expect(getHandover(db, created.handovers[0].id)?.status).toBe("fanned");
+
+    const again = await app.request(
+      new Request(`http://x/api/my/handovers/${created.handovers[0].id}/skip`, authed(token)),
+    );
+    expect(await again.json()).toEqual({ ok: true, sent: false });
   });
 });
 

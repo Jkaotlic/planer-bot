@@ -1,6 +1,6 @@
 import { InlineKeyboard, type Bot } from "grammy";
 import {
-  type FoodMenuItemShape, closesLabel, debtors, formatMoney, isOpenAt, menuItemLabel, orderInviteText, organizerSummaryText, payRequestText, splitAtLines,
+  type FoodMenuItemShape, closesLetterLabel, debtors, formatMoney, isOpenAt, menuItemLabel, orderInviteText, organizerSummaryText, payRequestText, splitAtLines,
 } from "@planer/shared";
 import { eq } from "drizzle-orm";
 import type { Db } from "../db/client";
@@ -60,7 +60,8 @@ export function orderTextFor(db: Db, order: FoodOrder, employeeId: number, today
     placeName: placeName(db, order),
     note: order.note,
     payHint: order.payHint,
-    closes: closesLabel(order.closesAt, today),
+    // Письмо читают позже, чем отправили, — срок не сегодня называется днём, не «завтра».
+    closes: closesLetterLabel(order.closesAt, today),
     myItems: itemsOf(db, order.id).filter((i) => i.employeeId === employeeId),
     declined: hasDeclined(db, order.id, employeeId),
   });
@@ -157,7 +158,10 @@ export async function sendOrderInvites(bot: Bot, db: Db, order: FoodOrder, now: 
 export async function finishOrderMessages(
   bot: Bot, db: Db, order: FoodOrder, reason: "closed" | "cancelled", _publicUrl: string,
 ): Promise<void> {
-  const { rows, byId } = names(db, order);
+  const { rows: all, byId } = names(db, order);
+  // Имена — всех (сводка называет и архивного должника), письма — только тем,
+  // кто ещё в команде.
+  const rows = all.filter((r) => r.isActive);
   for (const r of rows) {
     if (r.telegramUserId == null || r.messageId == null) continue;
     try {

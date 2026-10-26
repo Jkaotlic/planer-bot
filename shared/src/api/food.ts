@@ -94,3 +94,13 @@ export interface OrderRemindResult {
   unpaid: number;
   unreachable: string[];
 }
+
+/**
+ * Итог «Напомнить молчащим»: `silent` — знаменатель «D из N», как `unpaid` у заказа.
+ * `unreachable` — молчащие, до кого не достучаться (без Telegram или бот заблокирован).
+ */
+export interface PollRemindResult {
+  delivered: number;
+  silent: number;
+  unreachable: string[];
+}

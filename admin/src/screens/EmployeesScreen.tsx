@@ -1,7 +1,7 @@
 import { ConfirmButton } from "../components/ConfirmButton";
 import { useEffect, useState } from "react";
 import { useTeamTz } from "../lib/team-today";
-import { EMPLOYEE_NAME_MAX, PREFERRED_NAME_MAX, filterPeople, formatBlockedSince, MONTH_NAMES, parseBirthDate, restrictionsSummary, toBirthDate } from "@planer/shared";
+import { EMPLOYEE_NAME_MAX, PREFERRED_NAME_MAX, cannotHearBot, filterPeople, formatBlockedSince, MONTH_NAMES, parseBirthDate, restrictionsSummary, toBirthDate } from "@planer/shared";
 import { apiClient, type CreateEmployeeResult, type Employee } from "../api/client";
 import { useCategoryPalette } from "../categories";
 import { CollapsibleArchive } from "../components/CollapsibleArchive";
@@ -67,10 +67,18 @@ export function EmployeesScreen({ employees, onChanged, onRestrictionsSaved, onO
    */
   const [rowError, setRowError] = useState<{ employeeId: number; message: string } | null>(null);
   const [query, setQuery] = useState("");
+  const [onlyCannotHear, setOnlyCannotHear] = useState(false);
 
   const active = employees.filter((e) => e.isActive);
   const archived = employees.filter((e) => !e.isActive);
-  const visibleActive = filterPeople(active, query);
+  // Счёт — по всей команде, а не по найденному поиском: число про то, сколько
+  // работы у админа, и прыгать под набранными буквами ему незачем.
+  const cannotHearCount = active.filter(cannotHearBot).length;
+  // Последнего привязали — чип пропадает, и фильтр вместе с ним: иначе список
+  // остался бы пустым без кнопки, которой его вернуть.
+  const cannotHearOn = onlyCannotHear && cannotHearCount > 0;
+  const searched = filterPeople(active, query);
+  const visibleActive = cannotHearOn ? searched.filter(cannotHearBot) : searched;
 
   async function withBusy(id: number, action: () => Promise<void>) {
     setBusyId(id);
@@ -148,11 +156,32 @@ export function EmployeesScreen({ employees, onChanged, onRestrictionsSaved, onO
 
       <PersonSearch value={query} onChange={setQuery} count={employees.length} disabled={busyId !== null} />
 
+      {/* Метки «не привязан» и «🚫 заблокировал» есть в карточках, но в ростере
+          на тридцать строк их глазами не собрать — админ узнавал о человеке,
+          когда тот уже не ответил на опрос. Архив сюда не входит (см.
+          `cannotHearBot`), поэтому фильтр трогает только «Активных». */}
+      {cannotHearCount > 0 && (
+        <div className="employees-filters">
+          <button
+            type="button"
+            className={`status-chip status-chip-alert cannot-hear-chip${cannotHearOn ? " is-on" : ""}`}
+            aria-pressed={cannotHearOn}
+            title={cannotHearOn ? "Показать всех" : "Показать только тех, кому бот не может написать: без Telegram или заблокировавших бота"}
+            onClick={() => setOnlyCannotHear(!cannotHearOn)}
+          >
+            Не слышат бота: {cannotHearCount}
+          </button>
+        </div>
+      )}
+
       <EmployeesSection
         title="Активные"
         employees={visibleActive}
         fullOrder={active}
         emptyLabel="Пока нет активных работников"
+        // Под фильтром пустой результат не значит «такого имени нет»: человек
+        // с этим именем может быть — он просто слышит бота и под фильтр не попал.
+        noMatchLabel={cannotHearOn ? "Среди тех, кто не слышит бота, таких нет." : "Никого с таким именем нет."}
         actionLabel="Архивировать"
         confirmQuestionFor={(e) => `${e.displayName} — в архив? Будущие смены станут «Не назначено», отпуска впереди удалятся, обмены и выходные снимутся.`}
         busyId={busyId}
@@ -223,6 +252,8 @@ interface EmployeesSectionProps {
    */
   fullOrder: readonly Employee[];
   emptyLabel: string;
+  /** Подпись, когда ростер не пуст, но поиск (и фильтр, если включён) никого не оставил. */
+  noMatchLabel: string;
   actionLabel: string;
   /** Есть — действие спрашивает подтверждение (архивация необратима по сути). */
   confirmQuestionFor?: (employee: Employee) => string;
@@ -249,7 +280,7 @@ interface EmployeesSectionProps {
   onSetObserver: (id: number, isObserver: boolean) => void;
 }
 
-function EmployeesSection({ title, employees, fullOrder, emptyLabel, actionLabel, confirmQuestionFor, busyId, rowError, onAction, onToggleAdmin, onRename, onPreferredName, onShowInvite, onReorder, onBirthDate, onSetRestrictions, onSetObserver }: EmployeesSectionProps) {
+function EmployeesSection({ title, employees, fullOrder, emptyLabel, noMatchLabel, actionLabel, confirmQuestionFor, busyId, rowError, onAction, onToggleAdmin, onRename, onPreferredName, onShowInvite, onReorder, onBirthDate, onSetRestrictions, onSetObserver }: EmployeesSectionProps) {
   return (
     <section className="employees-section">
       <h3 className="employees-section-title">{title}</h3>
@@ -258,7 +289,7 @@ function EmployeesSection({ title, employees, fullOrder, emptyLabel, actionLabel
         // список бывает по двум разным причинам, и подпись обязана называть
         // ту, что случилась — иначе «Пока нет активных работников» соврёт
         // при полном ростере, если поиск просто ничего не нашёл.
-        <div className="employees-empty">{fullOrder.length === 0 ? emptyLabel : "Никого с таким именем нет."}</div>
+        <div className="employees-empty">{fullOrder.length === 0 ? emptyLabel : noMatchLabel}</div>
       ) : (
         <div className="employees-list">
           {employees.map((employee) => (

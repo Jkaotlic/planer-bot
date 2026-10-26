@@ -1,6 +1,6 @@
 import { useState } from "react";
 import {
-  POLL_CHOICE_LABEL, POLL_CHOICES, cancelPollQuestion, closePollQuestion, pollStatusLabel, pollTallyLines,
+  POLL_CHOICE_LABEL, POLL_CHOICES, canRemindSilent, cancelPollQuestion, closePollQuestion, pollRemindResultText, pollStatusLabel, pollTallyLines,
 } from "@planer/shared";
 import { apiClient, type PollView } from "../../api/client";
 import { ConfirmButton } from "../../components/ConfirmButton";
@@ -8,20 +8,23 @@ import { useAuthRequired } from "../../auth-required";
 import { failureText } from "./food-errors";
 
 /**
- * Опрос карточкой: голос, итог поимённо, а запускающему и админу — «Закрыть» и
- * «Отменить». Поведение — как у `miniapp/src/screens/food/PollCard.tsx`, тексты — из shared.
+ * Опрос карточкой: голос, итог поимённо, а запускающему и админу — «Напомнить
+ * молчащим», «Закрыть» и «Отменить». Поведение — как у `miniapp/src/screens/food/PollCard.tsx`, тексты — из shared.
  */
 export function PollCard({ poll: initial }: { poll: PollView }) {
   const onAuthRequired = useAuthRequired();
   const [poll, setPoll] = useState(initial);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [remindResult, setRemindResult] = useState<string | null>(null);
 
-  async function run(action: () => Promise<PollView>) {
+  async function attempt(action: () => Promise<void>) {
     setBusy(true);
     setError(null);
+    // Строка «Напомнил: …» — итог прошлого нажатия; после нового действия она устарела.
+    setRemindResult(null);
     try {
-      setPoll(await action());
+      await action();
     } catch (err) {
       setError(failureText(err, "Не получилось", onAuthRequired));
       // Любой отказ — повод перечитать: сервер мог закрыть опрос тиком, запускающий —
@@ -36,6 +39,10 @@ export function PollCard({ poll: initial }: { poll: PollView }) {
       setBusy(false);
     }
   }
+
+  const run = (action: () => Promise<PollView>) => attempt(async () => setPoll(await action()));
+  /** Напоминание отдаёт не опрос, а сколько дошло — как дожим у `OrderScreen`. */
+  const remind = () => attempt(async () => setRemindResult(pollRemindResultText(await apiClient.remindPollSilent(poll.id))));
 
   const tally = pollTallyLines(poll.tally);
   return (
@@ -63,6 +70,12 @@ export function PollCard({ poll: initial }: { poll: PollView }) {
           {tally.map((line) => <div key={line}>{line}</div>)}
         </div>
       )}
+      {canRemindSilent(poll) && (
+        <div className="food-buttons">
+          <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => void remind()}>🔔 Напомнить молчащим</button>
+        </div>
+      )}
+      {remindResult && <div className="food-meta" role="status">{remindResult}</div>}
       {poll.canManage && poll.open && (
         <div className="food-buttons">
           <ConfirmButton label="Закрыть и разослать итог" question={closePollQuestion(poll)} confirmLabel="Закрыть"

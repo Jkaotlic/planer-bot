@@ -84,12 +84,20 @@ describe("createFoodMock: копия наблюдателям — как resolve
 });
 
 describe("createFoodMock: «сейчас» — снаружи", () => {
-  it("срок позже «сейчас» принимается, раньше — тем же отказом, что у сервера", async () => {
+  it("опрос: срок позже «сейчас» — сегодня, раньше — завтра, как у сервера", async () => {
     const { mock } = mockAs({ id: 1, isAdmin: true }, { date: "2026-10-06", time: "23:30" });
     const { poll } = await mock.createPoll({ question: "Обед?", closesTime: "23:45", audience: { kind: "team" } });
     expect(poll.closes).toBe("до 23:45");
     expect(poll.open).toBe(true);
-    await expect(mock.createPoll({ question: "Обед?", closesTime: "23:00", audience: { kind: "team" } })).rejects.toThrow(
+    const { poll: tomorrow } = await mock.createPoll({ question: "Ужин?", closesTime: "23:00", audience: { kind: "team" } });
+    expect(tomorrow.closesAt).toBe("2026-10-07T23:00");
+    expect(tomorrow.closes).toBe("до завтра, 23:00");
+    expect(tomorrow.open).toBe(true);
+  });
+
+  it("заказ: время без даты — по-прежнему сегодня, прошедшее — тем же отказом, что у сервера", async () => {
+    const { mock } = mockAs({ id: 1, isAdmin: true }, { date: "2026-10-06", time: "23:30" });
+    await expect(mock.createOrder({ placeId: null, note: null, payHint: null, closesTime: "23:00", audience: { kind: "team" } })).rejects.toThrow(
       "Время уже прошло — поставь позже или оставь пустым.",
     );
   });
@@ -180,5 +188,73 @@ describe("createFoodMock: склейка строк как на сервере",
     const place = await mock.saveFoodPlace(null, { name: "Пустое", menu: [] });
     await expect(mock.createOrder({ ...base, placeId: place.id, allowCustom: false, closesAt: null })).rejects.toThrow("Без меню нужны свои позиции");
     await expect(mock.createOrder({ ...base, placeId: place.id, allowCustom: true, closesAt: null })).resolves.toBeTruthy();
+  });
+});
+
+describe("createFoodMock: «Напомнить молчащим» — как POST /api/polls/:id/remind", () => {
+  it("молчащие активные: «дошло» — с Telegram, без него — в unreachable; ответившие не считаются", async () => {
+    const people: FoodMockPerson[] = [...PEOPLE.map((p) => ({ ...p }))];
+    const state = { employees: people, me: { id: 1, isAdmin: false } };
+    const mock = createFoodMock({ delayMs: 0, state, now: () => ({ date: "2026-10-06", time: "12:00" }) });
+    // Адресаты: Аня (сама), Игорь, Марк (без Telegram), Лена (наблюдатель, копия).
+    const { poll } = await mock.createPoll({ question: "Обед?", closesTime: null, audience: { kind: "picked", employeeIds: [2, 3] } });
+    await mock.votePoll(poll.id, "for");
+    // Лена ушла в архив — как у сервера, её уже не зовут.
+    people[3] = { ...people[3]!, isActive: false };
+    expect(await mock.remindPollSilent(poll.id)).toEqual({ delivered: 1, silent: 2, unreachable: ["Марк"] });
+  });
+
+  it("отказы — те же тексты и тот же порядок, что у сервера", async () => {
+    const { state, mock } = mockAs({ id: 1, isAdmin: false });
+    const { poll } = await mock.createPoll({ question: "Обед?", closesTime: null, audience: { kind: "team" } });
+    state.me = { id: 2, isAdmin: false };
+    await expect(mock.remindPollSilent(poll.id)).rejects.toThrow("Напомнить может только тот, кто запустил опрос.");
+    state.me = { id: 1, isAdmin: false };
+    await mock.cancelPoll(poll.id);
+    await expect(mock.remindPollSilent(poll.id)).rejects.toThrow("Опрос отменён — напоминать не о чем.");
+    const { poll: other } = await mock.createPoll({ question: "Ужин?", closesTime: null, audience: { kind: "team" } });
+    await mock.closePoll(other.id);
+    await expect(mock.remindPollSilent(other.id)).rejects.toThrow("Опрос закрыт — напоминать уже не о чем.");
+  });
+});
+
+describe("createFoodMock: опрос — как сервер после архивации и при закрытии", () => {
+  it("архивный адресат не стоит в итоге и не считается в адресатах — как pollRecipientRows", async () => {
+    const people: FoodMockPerson[] = PEOPLE.map((p) => ({ ...p }));
+    const state = { employees: people, me: { id: 1, isAdmin: false } };
+    const mock = createFoodMock({ delayMs: 0, state, now: () => ({ date: "2026-10-06", time: "12:00" }) });
+    const { poll } = await mock.createPoll({ question: "Обед?", closesTime: null, audience: { kind: "picked", employeeIds: [2, 3] } });
+    expect(poll.tally.silent).toEqual(["Аня", "Игорь", "Марк", "Лена"]);
+    people[1] = { ...people[1]!, isActive: false }; // Игорь ушёл в архив
+    const after = await mock.getPoll(poll.id);
+    expect(after.tally.silent).toEqual(["Аня", "Марк", "Лена"]);
+    expect(after.recipientCount).toBe(3);
+    // Вернули из архива — снова адресат, строка не удалялась.
+    people[1] = { ...people[1]!, isActive: true };
+    expect((await mock.getPoll(poll.id)).tally.silent).toContain("Игорь");
+  });
+
+  it("закрыть и отменить чужой — те же отказы, что у сервера; админ — может", async () => {
+    const { state, mock } = mockAs({ id: 1, isAdmin: false });
+    const { poll } = await mock.createPoll({ question: "Обед?", closesTime: null, audience: { kind: "team" } });
+    state.me = { id: 2, isAdmin: false };
+    await expect(mock.closePoll(poll.id)).rejects.toThrow("Закрыть может только тот, кто запустил опрос.");
+    await expect(mock.cancelPoll(poll.id)).rejects.toThrow("Отменить может только тот, кто запустил опрос.");
+    expect((await mock.getPoll(poll.id)).open).toBe(true);
+    state.me = { id: 4, isAdmin: true };
+    expect((await mock.closePoll(poll.id)).open).toBe(false);
+  });
+
+  it("повторное закрытие и отмена закрытого — «Опрос уже закрыт.»; закрыть отменённый — «Опрос отменён.»", async () => {
+    const { mock } = mockAs({ id: 1, isAdmin: false });
+    const { poll } = await mock.createPoll({ question: "Обед?", closesTime: null, audience: { kind: "team" } });
+    await mock.closePoll(poll.id);
+    await expect(mock.closePoll(poll.id)).rejects.toThrow("Опрос уже закрыт.");
+    await expect(mock.cancelPoll(poll.id)).rejects.toThrow("Опрос уже закрыт.");
+    expect((await mock.getPoll(poll.id)).cancelled).toBe(false);
+    const { poll: other } = await mock.createPoll({ question: "Ужин?", closesTime: null, audience: { kind: "team" } });
+    await mock.cancelPoll(other.id);
+    await expect(mock.closePoll(other.id)).rejects.toThrow("Опрос отменён.");
+    await expect(mock.cancelPoll(other.id)).rejects.toThrow("Опрос уже закрыт.");
   });
 });

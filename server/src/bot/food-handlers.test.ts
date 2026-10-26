@@ -108,6 +108,27 @@ describe("кнопка «🧰 Сервисы»", () => {
     expect(buttons[2]!.web_app!.url).toBe("https://example.com/app/?screen=orders&new=poll");
   });
 
+  // Ответ «Сервисов» — тоже письмо, его читают позже: срок не сегодня — абсолютным днём.
+  it("срок не сегодня — «до Вт 27 октября, 08:00», а не «до завтра»", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-26T20:50:00Z")); // 23:50 по Москве
+    try {
+      const { db, bot, anya, igor } = stage();
+      createPoll(db, { createdBy: anya.id, question: "Суши?", closesAt: "2026-10-27T08:00", recipientIds: [anya.id, igor.id] });
+      createOrder(db, {
+        createdBy: anya.id, placeId: null, title: "Вода", allowCustom: true, note: null, payHint: null, closesAt: "2026-10-27T09:00", recipientIds: [anya.id, igor.id],
+      });
+      const api = recordApi(bot);
+      await say(bot, 333, BTN_SERVICES);
+      const text = api.sent.at(-1)!.text;
+      expect(text).toContain("🗳 Суши? (до Вт 27 октября, 08:00)");
+      expect(text).toContain("Вода (до Вт 27 октября, 09:00)");
+      expect(text).not.toContain("завтра");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   // Keyboards already on people's phones still say «🍱 Заказы» until the next /start.
   it("старая подпись «🍱 Заказы» из висящей клавиатуры открывает то же меню, а не заглушку", async () => {
     const { bot } = stage();
@@ -136,6 +157,24 @@ describe("колбэки опроса", () => {
     await tap(bot, 444, `poll:v:${poll.id}:for`);
     expect(voteOf(db, poll.id, mark.id)).toBeNull();
     expect(api.answers.join(" ")).toMatch(/не приходил/);
+  });
+
+  it("опрос закрылся, пока бот отвечал на тап голоса, — кнопки голоса в письмо не возвращаются", async () => {
+    const { db, bot, anya, igor, poll } = stage();
+    const api = recordApi(bot);
+    // Закрытие (кнопка запускающего или тик) влезает ровно между записью
+    // голоса и правкой письма — пока ждём ответа Telegram на тап.
+    bot.api.config.use(async (prev, method, payload, signal) => {
+      if (method === "answerCallbackQuery") closePoll(db, getPoll(db, poll.id)!, anya);
+      return prev(method, payload, signal);
+    });
+    await tap(bot, 333, `poll:v:${poll.id}:for`);
+    expect(voteOf(db, poll.id, igor.id)).toBe("for");
+    const edits = api.calls.filter((c) => c.method === "editMessageText");
+    expect(edits).toHaveLength(1);
+    expect(edits[0]!.payload.text).toContain("Твой голос: 👍 За");
+    const callbacks = (edits[0]!.payload.reply_markup?.inline_keyboard ?? []).flat().map((b: { callback_data?: string }) => b.callback_data ?? "");
+    expect(callbacks.filter((d: string) => d.startsWith("poll:v:"))).toEqual([]);
   });
 
   it("тап в закрытом опросе — «Опрос закрыт»", async () => {
@@ -241,6 +280,27 @@ describe("колбэки заказа", () => {
     for (let k = 0; k < 3; k++) await tap(bot, 333, `order:add:${market.id}:${place.menu[0]!.id}`);
     await tap(bot, 333, `order:undo:${market.id}`);
     expect(api.answers.at(-1)).toBe("− Икра кетовая 0,4 кг (осталось 0,8 кг)");
+  });
+
+  // Как у голоса в опросе: закрытие (кнопка запускающего или тик) влезает между
+  // записью тапа и правкой письма — пока ждём ответа Telegram. Правка с живой
+  // клавиатурой вернула бы кнопки заказу, у которого `finishOrderMessages` их уже погасил.
+  it.each([
+    ["＋ блюдо", (id: number, dish: number) => `order:add:${id}:${dish}`, "Твой заказ:"],
+    ["«Не буду»", (id: number) => `order:no:${id}`, "Ты не заказываешь"],
+  ] as const)("заказ закрылся, пока бот отвечал на тап (%s), — кнопки заказа в письмо не возвращаются", async (_label, data, text) => {
+    const { db, bot, anya, order, shawarmaId } = stage();
+    const api = recordApi(bot);
+    bot.api.config.use(async (prev, method, payload, signal) => {
+      if (method === "answerCallbackQuery") closeOrder(db, getOrder(db, order.id)!, anya);
+      return prev(method, payload, signal);
+    });
+    await tap(bot, 333, data(order.id, shawarmaId));
+    expect(getOrder(db, order.id)!.closedAt).not.toBeNull();
+    const edits = api.calls.filter((c) => c.method === "editMessageText");
+    expect(edits).toHaveLength(1);
+    expect(edits[0]!.payload.text).toContain(text);
+    expect((edits[0]!.payload.reply_markup?.inline_keyboard ?? []).flat()).toEqual([]);
   });
 
   it("«Закрыть приём» — только запускающему; после закрытия тап по блюду отвечает «Приём закрыт»", async () => {

@@ -1,6 +1,8 @@
-import { shiftsOverlap, canSwap, shiftStartMs } from "@planer/shared";
+import { canSwap, shiftStartMs } from "@planer/shared";
+import { eq, isNull, or } from "drizzle-orm";
 import type { Db } from "../db/client";
-import type { Handover, Shift } from "../db/schema";
+import { handovers, type Handover, type Shift } from "../db/schema";
+import { transition } from "../repo/transition";
 import { recordAudit } from "../repo/audit";
 import { safeErrorMessage } from "../util/safe-error";
 import { reachedNobody, scheduleLink, type AdminAction, type AdminReach } from "../bot/notify";
@@ -16,7 +18,8 @@ import {
   updateHandover,
 } from "../repo/handovers";
 import { getShift, listShiftsOverlapping, updateShift } from "../repo/shifts";
-import { entryLineOf, nameOf } from "../util/message-lines";
+import { entryLineOf, nameOf, shiftLineOf } from "../util/message-lines";
+import { busyWith } from "../schedule/busy";
 import { handoverCandidates } from "./candidates";
 import {
   handoverCancelledText,
@@ -247,8 +250,11 @@ export async function offerTo(deps: HandoverDeps, handoverId: number, toEmployee
   return { ok: true };
 }
 
+/** `sent` — ушло ли «Кто может выйти?» хоть кому-то: экран не должен говорить «спросили», когда не спросили. */
+export type FanOutcome = { ok: true; sent: boolean } | { ok: false; reason: string };
+
 /** Nobody in particular any more — everybody still free gets asked. */
-export async function fanOut(deps: HandoverDeps, handoverId: number): Promise<Outcome> {
+export async function fanOut(deps: HandoverDeps, handoverId: number): Promise<FanOutcome> {
   const { db } = deps;
   const handover = getHandover(db, handoverId);
   if (!handover || (handover.status !== "offered" && handover.status !== "fanned")) {
@@ -257,17 +263,43 @@ export async function fanOut(deps: HandoverDeps, handoverId: number): Promise<Ou
   const shift = shiftOf(db, handover);
   if (!shift) return { ok: false, reason: "Смены больше нет" };
 
+  // Веер — один раз на передачу. «Не могу» ждёт ответа Telegram на нажатие, тик —
+  // рассылки соседней передачи, и оба приходят сюда по одной строке. Проверка статуса выше
+  // и запись ниже раньше пропускали обоих, и команда получала «Кто может выйти?» дважды
+  // (H8). Рассылает только тот, чей условный переход прошёл; второму — `sent: false`.
+  //
+  // «Уже разослано» — это `fannedAt`, а не статус: эскалация «свободных нет» ставит
+  // `fanned`, никому не написав, и «Спросить всех» по ней обязан дойти до того, кто с тех
+  // пор освободился. Поэтому переход принимает `offered` (в том числе новый круг после
+  // личного предложения) и `fanned` без `fannedAt`. Круг считается до перехода — без
+  // await между ними, — и пустой круг `fannedAt` не ставит: никого не спросили, дорога
+  // следующему вееру открыта.
   const recipients = handoverCandidates(db, shift, { excludeIds: listDeclines(db, handoverId) }).map((e) => e.id);
-  const updated = updateHandover(db, handoverId, { status: "fanned", offeredToEmployeeId: null })!;
-  recordAudit(db, "handover_fanned", handover.fromEmployeeId, auditPayload(db, updated, shift, null));
-  if (recipients.length > 0) {
+  const sending = recipients.length > 0;
+  const moved = transition<Handover>(
+    db,
+    handovers,
+    handoverId,
+    ["offered", "fanned"],
+    { status: "fanned", offeredToEmployeeId: null, fannedAt: sending ? new Date() : null },
+    or(eq(handovers.status, "offered"), isNull(handovers.fannedAt)),
+  );
+  if (!moved) {
+    return getHandover(db, handoverId)?.status === "fanned" ? { ok: true, sent: false } : { ok: false, reason: "Передача уже закрыта" };
+  }
+  const updated = getHandover(db, handoverId)!;
+  // Пустой круг по уже `fanned` ничего не меняет — строка в журнале была бы о несостоявшемся.
+  if (sending || handover.status === "offered") {
+    recordAudit(db, "handover_fanned", handover.fromEmployeeId, auditPayload(db, updated, shift, null));
+  }
+  if (sending) {
     await deps.messenger.fan(
       recipients,
       handoverId,
       handoverFanText(nameOf(db, handover.fromEmployeeId) ?? "Коллега", lineOf(shift)),
     );
   }
-  return { ok: true };
+  return { ok: true, sent: sending };
 }
 
 /**
@@ -372,18 +404,12 @@ export async function takeHandover(
     }
     if (hasStarted(deps, shift)) return { ok: false as const, reason: STARTED_REFUSAL };
 
-    const clash = listShiftsOverlapping(db, shift.date, shift.endDate ?? shift.date).some(
-      (mine) =>
-        mine.employeeId === employeeId &&
-        mine.id !== shift.id &&
-        (mine.start == null || mine.end == null || shift.start == null || shift.end == null
-          ? true
-          : shiftsOverlap(
-              { date: mine.date, start: mine.start, end: mine.end },
-              { date: shift.date, start: shift.start, end: shift.end },
-            )),
-    );
-    if (clash) return { ok: false as const, reason: "У тебя в это время уже стоит своя смена" };
+    // Та же `busyWith`, что и у списка кандидатов: «Беру» и «кому предложить»
+    // не могут расходиться в том, кто занят. Она же видит ночь накануне (H7).
+    // Отказ называет мешающую запись: мешать может и отпуск, и «своя смена»
+    // про отпуск была бы неправдой — человек искал бы смену, которой нет.
+    const clash = busyWith(db, employeeId, shift, { ignoreEntryId: shift.id });
+    if (clash) return { ok: false as const, reason: clipForCallbackAnswer(`У тебя в это время уже стоит: ${shiftLineOf(db, clash.id)}`) };
 
     updateShift(db, shift.id, { employeeId });
     const updated = updateHandover(db, handoverId, {
@@ -572,6 +598,20 @@ export function settleHandoverVoidReason(db: Db, handover: Handover): VoidReason
 
 const STARTED_REFUSAL = "Эта смена уже началась";
 
+/** Предел Telegram для ответа на нажатие кнопки. */
+const CALLBACK_ANSWER_MAX = 200;
+
+/**
+ * Отказ «Беру» уходит ответом на нажатие, а длиннее 200 символов Telegram его не
+ * примет — и человек не увидит ничего. Строка записи несёт подпись до 200
+ * символов, поэтому режем с «…»: начало (день, часы) важнее хвоста подписи. По
+ * символам, а не по UTF-16: эмодзи в подписи не должен разломиться пополам.
+ */
+function clipForCallbackAnswer(text: string): string {
+  const chars = Array.from(text);
+  return chars.length <= CALLBACK_ANSWER_MAX ? text : `${chars.slice(0, CALLBACK_ANSWER_MAX - 1).join("")}…`;
+}
+
 /** Что сказать нажавшему «Беру» или «предложить», когда передача мертва. */
 export const VOID_REFUSAL: Record<VoidReason, string> = {
   gone: "Смены больше нет — её изменил админ",
@@ -653,6 +693,33 @@ export function cancelHandoversForEntryDb(
     cancelled.push({ handover, shift });
   }
   return cancelled;
+}
+
+/**
+ * Разрез больничного: живые передачи старой строки, чья смена лежит в днях отколотого куска,
+ * переходят на этот кусок — до гашения по дням первого куска.
+ *
+ * Не через `adoptByOtherSickLeave`: тот берёт только одобренные дни, а кусок заявки, ждущей
+ * «ОК», не одобрен — и передача гасла, коллегам уходил «отбой» про человека, который болен
+ * по-прежнему (H9). Здесь основание не новое, а тот же больничный, разрезанный админом, так
+ * что одобрение ни при чём. Статус и `fannedAt` не трогаем: это та же рассылка, а разосланная
+ * заново она спросила бы коллег о той же смене второй раз.
+ *
+ * Не переносим смену, которую ещё покрывает `kept` — первый кусок, сохранивший id: передача на
+ * нём жива и так, а перевешенная на отколотый погасла бы при его правке, хотя смена покрыта.
+ * И не переносим смену, ушедшую другому, — то же условие, что у `adoptByOtherSickLeave`: такая
+ * передача мертва и должна погаснуть, а не ожить на новом куске.
+ */
+export function moveHandoversToSplitPiecesDb(db: Db, sickEntryId: number, kept: Shift, pieces: readonly Shift[]): void {
+  // Пересечение промежутков — то же правило, что у `handoverVoidReason`.
+  const overlaps = (shift: Shift, span: Shift) => (shift.endDate ?? shift.date) >= span.date && shift.date <= (span.endDate ?? span.date);
+  for (const handover of listHandoversForEntry(db, sickEntryId)) {
+    if (handover.status !== "offered" && handover.status !== "fanned") continue;
+    const shift = shiftOf(db, handover);
+    if (!shift || shift.employeeId !== handover.fromEmployeeId || overlaps(shift, kept)) continue;
+    const piece = pieces.find((p) => overlaps(shift, p));
+    if (piece) updateHandover(db, handover.id, { sickEntryId: piece.id });
+  }
 }
 
 /**

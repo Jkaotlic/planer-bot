@@ -524,6 +524,19 @@ describe("AddEntryPanel — замена отсутствия", () => {
     expect(saved).not.toHaveProperty("replaceAbsences");
   });
 
+  // «С/По» шире отпуска уходят перезаписью: смены 23–26 июня, о которых панель
+  // не знает, перепишутся. Подсказка говорила только про отпуск (H10).
+  it("«По» за правимым отпуском: подсказка говорит, что остальные дни перепишутся", async () => {
+    const el = await mount({ existing: longVacation, onSaveRange: async () => {} });
+    await act(async () => optionByText(el, "День").click());
+    const preview = () => el.querySelector('[data-testid="range-preview"]')!.textContent ?? "";
+    // В пределах отпуска перезаписывать нечего — и подсказка об этом молчит.
+    expect(preview()).not.toContain("Смены и дежурства в остальных днях перепишутся");
+
+    await setInput(el.querySelector<HTMLInputElement>("#entry-to")!, "2026-06-26");
+    expect(preview()).toContain("Смены и дежурства в остальных днях перепишутся");
+  });
+
   // Админ хочет «Днём» только пятницу 12-го: суженные «С/По» — замена одного дня,
   // а не правка строки, которая перенесла бы в смену весь отпуск.
   it("один день из отпуска: суженные «С/По» шлют замену одного дня", async () => {

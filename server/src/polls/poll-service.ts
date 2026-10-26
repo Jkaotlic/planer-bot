@@ -1,5 +1,5 @@
 import { and, desc, eq, gte, inArray, isNull, lte, isNotNull, or, sql } from "drizzle-orm";
-import { closesLabel, isOpenAt, pollTally, type PollChoice, type PollTally } from "@planer/shared";
+import { POLL_OPEN_MAX_DAYS, closesLabel, isOpenAt, pollTally, type PollChoice, type PollTally } from "@planer/shared";
 import type { Db } from "../db/client";
 import { employees, pollRecipients, pollVotes, polls, type Poll } from "../db/schema";
 
@@ -68,6 +68,14 @@ export function getPoll(db: Db, id: number): Poll | undefined {
   return db.select().from(polls).where(eq(polls.id, id)).get();
 }
 
+/**
+ * Адресаты опроса, которые ещё в команде.
+ *
+ * Архивация строки `poll_recipients` не трогает, а опрос без срока живёт
+ * дольше, чем человек в команде. Без фильтра ушедший получал бы итог и
+ * «Опрос отменён» и стоял бы в «Не ответили», хотя отвечать ему уже не на
+ * что. Строка не удаляется: вернули из архива — он снова адресат.
+ */
 export function pollRecipientRows(db: Db, pollId: number) {
   return db
     .select({
@@ -78,7 +86,7 @@ export function pollRecipientRows(db: Db, pollId: number) {
     })
     .from(pollRecipients)
     .innerJoin(employees, eq(employees.id, pollRecipients.employeeId))
-    .where(eq(pollRecipients.pollId, pollId))
+    .where(and(eq(pollRecipients.pollId, pollId), eq(employees.isActive, true)))
     .orderBy(pollRecipients.employeeId)
     .all();
 }
@@ -132,9 +140,21 @@ export function cancelPoll(db: Db, poll: Poll, viewer: Viewer): Result {
   return finish(db, poll.id, "cancelledAt") ? { ok: true } : { ok: false, error: "Опрос уже закрыт." };
 }
 
-export function closeDuePolls(db: Db, now: TeamClock): Poll[] {
+/**
+ * Опросы, которым пора закрыться: срок прошёл или опрос без срока старше
+ * `POLL_OPEN_MAX_DAYS`.
+ *
+ * Возраст считается от момента `at` (по умолчанию — сейчас), а не от
+ * командной даты: `createdAt` — момент UTC, и «три дня» здесь — длительность,
+ * а не граница дня, так что часовой пояс команды ни на что не влияет.
+ */
+export function closeDuePolls(db: Db, now: TeamClock, at: Date = new Date()): Poll[] {
+  const tooOld = new Date(at.getTime() - POLL_OPEN_MAX_DAYS * 24 * 60 * 60 * 1000);
   const due = db.select().from(polls)
-    .where(and(isNull(polls.closedAt), isNull(polls.cancelledAt), isNotNull(polls.closesAt), lte(polls.closesAt, `${now.date}T${now.time}`)))
+    .where(and(isNull(polls.closedAt), isNull(polls.cancelledAt), or(
+      and(isNotNull(polls.closesAt), lte(polls.closesAt, `${now.date}T${now.time}`)),
+      and(isNull(polls.closesAt), lte(polls.createdAt, tooOld)),
+    )))
     .all();
   return due.filter((p) => finish(db, p.id, "closedAt"));
 }
@@ -184,12 +204,22 @@ export function pollView(db: Db, poll: Poll, viewer: Viewer, now: TeamClock): Po
   };
 }
 
-/** Последние двадцать — старше экрану не нужно: опрос живёт день-два. */
+/**
+ * Последние двадцать — старше экрану не нужно: опрос живёт день-два.
+ *
+ * Админу — ещё и все чужие идущие: закрыть чужой опрос он вправе
+ * (`canManage`), а право без кнопки на экране ничего не стоит. Закрытые чужие
+ * не показываются — это экран текущих дел, а не архив команды.
+ */
 export function listPollsFor(db: Db, viewer: Viewer, now: TeamClock): PollView[] {
   const mine = db.select({ pollId: pollRecipients.pollId }).from(pollRecipients)
     .where(eq(pollRecipients.employeeId, viewer.id)).all().map((r) => r.pollId);
   const rows = db.select().from(polls)
-    .where(or(eq(polls.createdBy, viewer.id), mine.length > 0 ? inArray(polls.id, mine) : undefined))
+    .where(or(
+      eq(polls.createdBy, viewer.id),
+      mine.length > 0 ? inArray(polls.id, mine) : undefined,
+      viewer.isAdmin ? and(isNull(polls.closedAt), isNull(polls.cancelledAt)) : undefined,
+    ))
     .orderBy(desc(polls.id)).limit(20).all();
   return rows.map((p) => pollView(db, p, viewer, now)).filter((v): v is PollView => v != null);
 }

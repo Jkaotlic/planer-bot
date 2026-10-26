@@ -80,3 +80,57 @@ describe("PollCard — админ у чужого опроса", () => {
     expect(el.textContent).toContain("Отменить чужой опрос (спрашивает Игорь)?");
   });
 });
+
+// Кнопка показывается ровно тогда, когда ручка её примет (`canRemindSilent`),
+// — иначе карточка обещала бы напоминание, которое не уйдёт.
+describe("PollCard — «🔔 Напомнить молчащим»", () => {
+  const REMIND = "🔔 Напомнить молчащим";
+  const MANAGED: PollView = { ...POLL, isCreator: true, canManage: true, tally: { for: [], against: [], abstain: [], silent: ["Игорь", "Марк"] } };
+
+  it("управляющий, опрос идёт, молчащие есть — кнопка шлёт и пишет «Напомнил: D из N»", async () => {
+    const remind = vi.spyOn(apiClient, "remindPollSilent").mockResolvedValue({ delivered: 1, silent: 2, unreachable: ["Марк"] });
+    const el = await mountCard(MANAGED);
+    await act(async () => byText(el, REMIND)!.click());
+    await settle();
+    expect(remind).toHaveBeenCalledWith(5);
+    expect(el.textContent).toContain("Напомнил: 1 из 2. Не дошло: Марк");
+  });
+
+  it("нет кнопки: не управляющий, опрос закрыт, все ответили", async () => {
+    for (const over of [
+      { canManage: false, isCreator: false },
+      { open: false },
+      { tally: { for: ["Игорь", "Марк"], against: [], abstain: [], silent: [] } },
+    ]) {
+      const el = await mountCard({ ...MANAGED, ...over });
+      expect(byText(el, REMIND)).toBeUndefined();
+      await act(async () => root!.unmount());
+      host?.remove();
+      root = null;
+      host = null;
+    }
+  });
+
+  it("отказ — текст виден, опрос перечитан: закрытый уже без кнопки", async () => {
+    vi.spyOn(apiClient, "remindPollSilent").mockRejectedValue(new Error("Опрос закрыт — напоминать уже не о чем."));
+    const getPoll = vi.spyOn(apiClient, "getPoll").mockResolvedValue({ ...MANAGED, open: false });
+    const el = await mountCard(MANAGED);
+    await act(async () => byText(el, REMIND)!.click());
+    await settle();
+    expect(getPoll).toHaveBeenCalledWith(5);
+    expect(el.textContent).toContain("Опрос закрыт — напоминать уже не о чем.");
+    expect(byText(el, REMIND)).toBeUndefined();
+  });
+
+  it("новое действие после напоминания убирает старую строку «Напомнил: …»", async () => {
+    vi.spyOn(apiClient, "remindPollSilent").mockResolvedValue({ delivered: 2, silent: 2, unreachable: [] });
+    vi.spyOn(apiClient, "votePoll").mockResolvedValue({ ...MANAGED, myChoice: "for" });
+    const el = await mountCard(MANAGED);
+    await act(async () => byText(el, REMIND)!.click());
+    await settle();
+    expect(el.textContent).toContain("Напомнил: 2 из 2");
+    await act(async () => byText(el, "👍 За")!.click());
+    await settle();
+    expect(el.textContent).not.toContain("Напомнил:");
+  });
+});

@@ -131,3 +131,18 @@ export function listPendingSickLeavesWithin(db: Db, today: string, horizon: stri
 export function markHandoverForced(db: Db, id: number, at: Date): void {
   db.update(shifts).set({ handoverForcedAt: at }).where(and(eq(shifts.id, id), isNull(shifts.handoverForcedAt))).run();
 }
+
+/**
+ * Pending sick leaves asked about at or before `cutoff` — the reminder tick's working set.
+ * Its own query, not a filter over `listPendingSickLeaves`: that one is capped newest-first,
+ * so with many fresh requests the old ones — exactly the ones to remind about — would fall off.
+ */
+export function listSickLeavesPendingSince(db: Db, cutoff: Date, limit = 100): Shift[] {
+  return db
+    .select()
+    .from(shifts)
+    .where(and(isNotNull(shifts.approvalRequestedAt), eq(shifts.category, "sick_leave"), lte(shifts.approvalRequestedAt, cutoff)))
+    .orderBy(desc(shifts.approvalRequestedAt), desc(shifts.id))
+    .limit(limit)
+    .all();
+}

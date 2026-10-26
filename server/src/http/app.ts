@@ -71,6 +71,7 @@ import {
 } from "../bot/notify";
 import {
   slotLineOf,
+  shiftLineOf,
   nameOf as nameOfDb,
   swapAuditPayload as swapAuditPayloadDb,
   entryAuditPayload,
@@ -95,7 +96,7 @@ import {
   sickApprovalDeps,
   takeRequestOutOfPending,
 } from "../sick-approval/sick-approval-service";
-import { cancelHandoversForEntryDb, detachHandoversFromEntry, notifyCancelledHandovers, type CancelledHandover } from "../handover/handover-service";
+import { cancelHandoversForEntryDb, detachHandoversFromEntry, moveHandoversToSplitPiecesDb, notifyCancelledHandovers, type CancelledHandover } from "../handover/handover-service";
 import { createCalendarRoutes } from "./routes/calendar";
 import { createPollRoutes } from "./routes/polls";
 import { createFoodPlaceRoutes } from "./routes/food-places";
@@ -151,6 +152,8 @@ import {
   EMPLOYEE_NAME_MAX,
   tooLongText,
   type SickApprovalRow,
+  weekendBusyRefusal,
+  ASSIGN_REFUSAL_TEXT,
 } from "@planer/shared";
 import {
   postSlot,
@@ -1977,9 +1980,10 @@ export function createApp(deps: AppDeps): Hono<Env> {
    * который сказал бы коллегам «снял(а) больничный» про то, чего человек не делал.
    *
    * Кусок после разреза — новая строка с теми же полями. Передачи его дней
-   * переходят на неё сами (`adoptByOtherSickLeave` внутри гашения): человек
-   * болен по-прежнему, и смена всё так же ищет хозяина. Поэтому кусок создаётся
-   * ДО гашения — иначе перевешивать было бы не на что.
+   * переходят на неё явно (`moveHandoversToSplitPiecesDb`), а не переносом внутри
+   * гашения: тот берёт только одобренные дни, и кусок заявки, ждущей «ОК», терял
+   * бы передачу (H9). Человек болен по-прежнему, и смена всё так же ищет хозяина.
+   * Поэтому кусок создаётся ДО гашения — иначе перевешивать было бы не на что.
    */
   const cutAbsenceDb = (row: Shift, days: readonly string[], actorEmployeeId: number): AbsenceCut => {
     const pieces = cutDaysFromSpan(row, days);
@@ -2013,6 +2017,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       return { entry, asksApproval: wholly ? (false as const) : approved };
     });
     const after = updateShift(db, row.id, { date: first.date, endDate: first.endDate })!;
+    if (row.category === "sick_leave") moveHandoversToSplitPiecesDb(db, row.id, after, split.map((piece) => piece.entry));
     const cancelledNow = row.category === "sick_leave"
       ? cancelHandoversForEntryDb(db, row.id, eachDayIso(after.date, after.endDate ?? after.date))
       : [];
@@ -2697,10 +2702,14 @@ export function createApp(deps: AppDeps): Hono<Env> {
     if (typeof body.employeeId !== "number") return c.json({ error: "employeeId is required" }, 400);
     const res = assignSlot(db, Number(c.req.param("id")), body.employeeId, teamNow(config.teamTz).date);
     if (!res.ok) {
-      // "excluded" is the one reason here an admin can act on directly — the worker
-      // isn't broken, someone deliberately took them out of assignments — so it gets
-      // a human phrase. The other reason codes pass through as-is, unchanged.
-      const error = res.reason === "excluded" ? "Этот человек выведен из назначений" : res.reason;
+      // Обе консоли показывают `error` как есть, поэтому каждый код — фраза
+      // (`ASSIGN_REFUSAL_TEXT`, полная по типу: новый код без фразы не соберётся).
+      // «busy» называет мешающую запись: голое «занят» отправило бы админа искать
+      // причину по всему графику.
+      const error =
+        res.reason === "busy"
+          ? weekendBusyRefusal(nameOf(body.employeeId) ?? "Работник", shiftLineOf(db, res.clash.id))
+          : ASSIGN_REFUSAL_TEXT[res.reason];
       return c.json({ error }, 400);
     }
     const slot = getVacantSlot(db, res.assignment.slotId);

@@ -12,8 +12,8 @@ export type { TeamAudience, PollChoice, PollTally } from "@planer/shared";
 export type { PlaceInput } from "@planer/shared";
 // Ответы ручек опросов, заказов, мест и адресатов — в shared с 2026-10-06: их же
 // читает консоль, а две копии одной формы разъезжаются молча.
-import type { AudienceCandidate, OrderView, PlaceView, PollView } from "@planer/shared";
-export type { AudienceCandidate, OrderView, PlaceView, PollView } from "@planer/shared";
+import type { AudienceCandidate, OrderView, PlaceView, PollRemindResult, PollView } from "@planer/shared";
+export type { AudienceCandidate, OrderView, PlaceView, PollRemindResult, PollView } from "@planer/shared";
 import type {
   AdminEmployeeDto,
   ChecklistDelivery,
@@ -143,6 +143,7 @@ import {
   mockVotePoll,
   mockClosePoll,
   mockCancelPoll,
+  mockRemindPollSilent,
   mockGetFoodPlaces,
   mockSaveFoodPlace,
   mockArchiveFoodPlace,
@@ -1037,6 +1038,8 @@ export interface ApiClient {
   closePoll(id: number): Promise<PollView>;
   /** Отменяет опрос без итога — запускающему передумалось. */
   cancelPoll(id: number): Promise<PollView>;
+  /** «Напомнить молчащим»: `silent` — знаменатель «D из N», как `unpaid` у заказа. */
+  remindPollSilent(id: number): Promise<PollRemindResult>;
 
   // --- Места и меню («Заказы и опросы») --------------------------------------
   /** Места с меню — общие для всей команды, не только для смотрящего. */
@@ -1847,6 +1850,9 @@ export const realClient: ApiClient = {
   async cancelPoll(id) {
     return (await authorizedPostJson<{ poll: PollView }>(`/api/polls/${id}/cancel`, {})).poll;
   },
+  remindPollSilent(id) {
+    return authorizedPostJson<PollRemindResult>(`/api/polls/${id}/remind`, {});
+  },
 
   async getFoodPlaces() {
     return (await authorizedGet<{ places: PlaceView[] }>("/api/food-places")).places;
@@ -2042,6 +2048,7 @@ const createDevClient = (): ApiClient => ({
   votePoll: (id, choice) => mockVotePoll(id, choice),
   closePoll: (id) => mockClosePoll(id),
   cancelPoll: (id) => mockCancelPoll(id),
+  remindPollSilent: (id) => mockRemindPollSilent(id),
   getFoodPlaces: () => mockGetFoodPlaces(),
   saveFoodPlace: (id, input) => mockSaveFoodPlace(id, input),
   archiveFoodPlace: (id) => mockArchiveFoodPlace(id),

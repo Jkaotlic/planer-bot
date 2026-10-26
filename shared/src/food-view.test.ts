@@ -29,6 +29,8 @@ import {
   placeMenuFromRows,
   pollStatusLabel,
   priceDigits,
+  canRemindSilent,
+  pollRemindResultText,
   remindResultText,
   sendReportText,
   sendReportTitle,
@@ -116,6 +118,27 @@ describe("отчёты рассылки", () => {
     expect(remindResultText({ delivered: 0, unpaid: 0, unreachable: [] })).toBe("Все уже сдали 🎉");
     expect(remindResultText({ delivered: 2, unpaid: 2, unreachable: [] })).toBe("Напомнил: 2 из 2");
     expect(remindResultText({ delivered: 1, unpaid: 2, unreachable: ["Марк"] })).toBe("Напомнил: 1 из 2. Не дошло: Марк");
+  });
+
+  it("напомнить молчащим: все ответили / «D из N» / с недошедшими", () => {
+    expect(pollRemindResultText({ delivered: 0, silent: 0, unreachable: [] })).toBe("Все уже ответили 🎉");
+    expect(pollRemindResultText({ delivered: 2, silent: 2, unreachable: [] })).toBe("Напомнил: 2 из 2");
+    expect(pollRemindResultText({ delivered: 1, silent: 2, unreachable: ["Марк"] })).toBe("Напомнил: 1 из 2. Не дошло: Марк");
+  });
+});
+
+describe("canRemindSilent — кнопка «Напомнить молчащим»", () => {
+  const tally = { for: ["Аня"], against: [], abstain: [], silent: ["Игорь"] };
+  const base = { canManage: true, open: true, tally };
+
+  it("управляющий, опрос идёт, молчащие есть — кнопка есть", () => {
+    expect(canRemindSilent(base)).toBe(true);
+  });
+
+  it("не управляющий, опрос закрыт или все ответили — кнопки нет", () => {
+    expect(canRemindSilent({ ...base, canManage: false })).toBe(false);
+    expect(canRemindSilent({ ...base, open: false })).toBe(false);
+    expect(canRemindSilent({ ...base, tally: { ...tally, silent: [] } })).toBe(false);
   });
 });
 

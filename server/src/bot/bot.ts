@@ -1241,6 +1241,22 @@ export function createBot(deps: BotDeps): Bot {
       await ctx.answerCallbackQuery({ text: "Сбор не найден" });
       return;
     }
+    // Кнопка живёт в чате вечно, как и у «другого дня»: второй тап или тап
+    // после рассылки слал бы админам «Автоотправка выключена» и писал журнал о
+    // перемене, которой не было. Разосланный и закрытый сбор тик не тронет и
+    // так — ответ тот же, что у `collection:autoday`.
+    if (collection.sendCount > 0) {
+      await ctx.answerCallbackQuery({ text: "Сбор уже разослан — второй раз бот не шлёт" });
+      return;
+    }
+    if (!isCollectionActive(collection, teamNow(config.teamTz).date)) {
+      await ctx.answerCallbackQuery({ text: "Сбор закрыт или праздник прошёл" });
+      return;
+    }
+    if (collection.autoSendOn == null) {
+      await ctx.answerCallbackQuery({ text: "Автоотправка уже выключена." });
+      return;
+    }
     // Гасим только автоотправку. Ссылку не трогаем: отвязывать её заодно —
     // значит наказывать за нажатие кнопки «подожди».
     updateCollection(db, collection.id, { autoSendOn: null });
@@ -1788,7 +1804,7 @@ export function createBot(deps: BotDeps): Bot {
         : await declineHandover(deps, handoverId, who.me.id, onDecided);
     if (!res.ok) {
       // The service writes its refusals in Russian a person can read — «Уже
-      // забрали», «У тебя в это время уже стоит своя смена» — so they go straight
+      // забрали», «У тебя в это время уже стоит: <запись>» — so they go straight
       // through. There is no reason code to translate here, unlike swaps.
       await ctx.answerCallbackQuery({ text: res.reason });
       return;

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { POLL_CHOICES_HINT, POLL_QUESTION_MAX, audienceReady, sendReportText, sendReportTitle, type FoodSendReport, type TeamAudience } from "@planer/shared";
+import { POLL_CHOICES_HINT, POLL_CLOSES_HINT, POLL_QUESTION_MAX, audienceReady, sendReportText, sendReportTitle, type FoodSendReport, type TeamAudience } from "@planer/shared";
 import { apiClient } from "../../api/client";
 import { AudiencePicker } from "./AudiencePicker";
 import { useAuthRequired } from "../../auth-required";
@@ -65,6 +65,7 @@ export function PollForm({ onDone, onCancel }: { onDone(): void; onCancel(): voi
         Голосуем до (необязательно)
         <input type="time" className="food-time" aria-label="Голосуем до" value={closesTime} disabled={busy} onChange={(e) => setClosesTime(e.target.value)} />
       </label>
+      <div className="food-meta">{POLL_CLOSES_HINT}</div>
       <div className="food-meta">{POLL_CHOICES_HINT}</div>
       <AudiencePicker value={audience} onChange={setAudience} disabled={busy} />
       {error && <div className="employees-error" role="alert">{error}</div>}

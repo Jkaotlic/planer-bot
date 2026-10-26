@@ -1,8 +1,8 @@
 import { eq } from "drizzle-orm";
-import { shiftDurationHours, isDayOff, isAbsence, takesPartInAssignment, type EntryCategory } from "@planer/shared";
+import { shiftDurationHours, isDayOff, isAbsence, takesPartInAssignment, type AssignReason, type EntryCategory } from "@planer/shared";
 import type { Db } from "../db/client";
 import { loadCalendar } from "../repo/calendar-days";
-import { weekendAssignments, type VacantSlot, type WeekendAssignment } from "../db/schema";
+import { weekendAssignments, type Shift, type VacantSlot, type WeekendAssignment } from "../db/schema";
 import {
   createVacantSlot,
   listOpenSlots,
@@ -27,15 +27,19 @@ import {
 } from "../repo/weekend";
 import { createShift, deleteShift, listShiftsOverlapping } from "../repo/shifts";
 import { employeesByIds, getEmployeeById } from "../repo/employees";
+import { busyWith } from "../schedule/busy";
 
 export type Outcome = { ok: true } | { ok: false; reason: string };
-/** Every refusal `assignSlot` actually returns — narrowed so a typo on either
- *  side of the route's `res.reason === "excluded" ? … : res.reason` check
- *  would be caught by `tsc` instead of shipping a raw code to the screen. */
-export type AssignReason = "not_found" | "not_open" | "slot_passed" | "not_weekend" | "not_active" | "excluded" | "not_interested";
+/** Коды отказа и их фразы — в @planer/shared (`ASSIGN_REFUSAL_TEXT`). */
+export type { AssignReason };
 /** `changed` is false only for the true no-op branch below (already assigned, nothing
- *  written) — callers use it to skip re-notifying the worker on a repeat "Назначить". */
-export type AssignOutcome = { ok: true; assignment: WeekendAssignment; changed: boolean } | { ok: false; reason: AssignReason };
+ *  written) — callers use it to skip re-notifying the worker on a repeat "Назначить".
+ *  `busy` несёт мешающую запись: админу надо назвать, ЧТО стоит, иначе «занят»
+ *  отправляет его искать причину по всему графику. */
+export type AssignOutcome =
+  | { ok: true; assignment: WeekendAssignment; changed: boolean }
+  | { ok: false; reason: Exclude<AssignReason, "busy"> }
+  | { ok: false; reason: "busy"; clash: Shift };
 /** `slotId` lets callers build a "<name> confirmed/declined <slot>" admin
  *  broadcast without a second lookup. */
 export type ConfirmOutcome = { ok: true; slotId: number } | { ok: false; reason: string };
@@ -229,6 +233,15 @@ export function assignSlot(db: Db, slotId: number, employeeId: number, today: st
   if (existing && existing.status !== "declined" && existing.shiftId != null) {
     return { ok: true, assignment: existing, changed: false };
   }
+
+  // Слот пишет человеку запись в график — поверх его же смены или ночи накануне
+  // это два места сразу и двойная оплата в ведомости. Отпуск не мешает: по его
+  // решению от 2026-07-30 это пометка в списке желающих, а не запрет. Стоит после
+  // no-op ветки выше: живое назначение уже держит свою запись, и та сделала бы
+  // повторное «Назначить» отказом «занят» самим собой. Дальше записи слота у
+  // человека нет: отказ её удалил, а ветка починки потому и чинит, что её нет.
+  const clash = busyWith(db, employeeId, slot, { ignoreAbsences: true });
+  if (clash) return { ok: false, reason: "busy", clash };
 
   // The schedule entry and the assignment that explains it are one fact written to
   // two tables: an entry no assignment accounts for shows the slot as unstaffed

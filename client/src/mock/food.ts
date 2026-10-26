@@ -1,7 +1,7 @@
 import {
   FOOD_CLOSE_HORIZON_DAYS, dateStr, FOOD_ITEMS_PER_PERSON_MAX, FOOD_QTY_MAX, announcementRole, closesAtFromTime, closesLabel, debtOf, debtors, dishSummary, itemsLimitText, qtyLimitText,
   isFutureClose, isOpenAt, isWithinCloseHorizon, orderItemInputSchema, orderTotal, paymentProgress, placeInputSchema, pollTally,
-  type AudienceCandidate, type FoodSendReport, type FoodUnit, type OrderRemindResult, type OrderView, type PlaceInput, type PlaceView,
+  type AudienceCandidate, type FoodSendReport, type FoodUnit, type OrderRemindResult, type OrderView, type PollRemindResult, type PlaceInput, type PlaceView,
   type PollChoice, type PollView, type TeamAudience,
 } from "@planer/shared";
 import { delay } from "./delay";
@@ -94,7 +94,12 @@ export function createFoodMock(opts: FoodMockOptions) {
 
   function pollViewOf(p: MockPoll): PollView {
     const now = clock();
-    const people = p.recipients.map((id) => ({ employeeId: id, displayName: staff().find((e) => e.id === id)?.displayName ?? "—" }));
+    // Только те, кто ещё в команде, — как `pollRecipientRows` сервера: архивный не
+    // стоит в «Не ответили», а вернули из архива — снова адресат (id из списка не удаляется).
+    const people = p.recipients
+      .map((id) => staff().find((e) => e.id === id))
+      .filter((e): e is FoodMockPerson => e != null && e.isActive)
+      .map((e) => ({ employeeId: e.id, displayName: e.displayName }));
     return {
       id: p.id,
       question: p.question,
@@ -108,7 +113,7 @@ export function createFoodMock(opts: FoodMockOptions) {
       canManage: p.createdBy === me().id || me().isAdmin,
       myChoice: p.votes.get(me().id) ?? null,
       tally: pollTally(people, [...p.votes].map(([employeeId, choice]) => ({ employeeId, choice }))),
-      recipientCount: p.recipients.length,
+      recipientCount: people.length,
     };
   }
 
@@ -167,11 +172,8 @@ export function createFoodMock(opts: FoodMockOptions) {
     await wait();
     if (!input.question.trim()) throw new Error("Проверь вопрос, время и адресатов.");
     const now = clock();
-    const closesAt = closesAtFromTime(input.closesTime, now.date);
-    // Тот же отказ и тот же текст, что у ручки `POST /api/polls` на сервере —
-    // иначе DEV показал бы опрос, у которого приём голосов кончился в момент
-    // рождения, и кнопки на карточке были бы погашены с первого рендера.
-    if (!isFutureClose(closesAt, now)) throw new Error("Время уже прошло — поставь позже или оставь пустым.");
+    // Как у `POST /api/polls`: прошедшее сегодня время — завтрашнее, отказа нет.
+    const closesAt = closesAtFromTime(input.closesTime, now);
 
     const ids = audienceIds(input.audience);
     const recipients = [...new Set([me().id, ...ids.filter((id) => id !== me().id)])];
@@ -219,18 +221,43 @@ export function createFoodMock(opts: FoodMockOptions) {
     return pollViewOf(p);
   }
 
+  const canManagePoll = (p: MockPoll) => p.createdBy === me().id || me().isAdmin;
+
+  /** Те же отказы и тот же порядок, что у `closePoll` сервера: права, «отменён», «уже закрыт». */
   async function closePoll(id: number): Promise<PollView> {
     await wait();
     const p = pollOrThrow(id);
+    if (!canManagePoll(p)) throw new Error("Закрыть может только тот, кто запустил опрос.");
+    if (p.cancelledAt != null) throw new Error("Опрос отменён.");
+    if (p.closedAt != null) throw new Error("Опрос уже закрыт.");
     p.closedAt = new Date().toISOString();
     return pollViewOf(p);
   }
 
+  /** Как `cancelPoll` сервера: права, потом «уже закрыт» — и для закрытого, и для отменённого. */
   async function cancelPoll(id: number): Promise<PollView> {
     await wait();
     const p = pollOrThrow(id);
+    if (!canManagePoll(p)) throw new Error("Отменить может только тот, кто запустил опрос.");
+    if (p.closedAt != null || p.cancelledAt != null) throw new Error("Опрос уже закрыт.");
     p.cancelledAt = new Date().toISOString();
     return pollViewOf(p);
+  }
+
+  /** «Напомнить молчащим» — тот же порядок отказов и тот же ответ, что у
+   *  `POST /api/polls/:id/remind`: права, «отменён ли», «идёт ли»; молчащие —
+   *  только те, кто ещё в команде (`pollRecipientRows` сервера архивных не отдаёт). */
+  async function remindPollSilent(id: number): Promise<PollRemindResult> {
+    await wait();
+    const p = pollOrThrow(id);
+    if (!canManagePoll(p)) throw new Error("Напомнить может только тот, кто запустил опрос.");
+    if (p.cancelledAt != null) throw new Error("Опрос отменён — напоминать не о чем.");
+    if (!isOpenAt(p, clock())) throw new Error("Опрос закрыт — напоминать уже не о чем.");
+    const silent = p.recipients
+      .map((rid) => staff().find((e) => e.id === rid))
+      .filter((e): e is FoodMockPerson => e != null && e.isActive && !p.votes.has(e.id));
+    const unreachable = silent.filter((e) => e.telegramUserId == null).map((e) => e.displayName);
+    return { delivered: silent.length - unreachable.length, silent: silent.length, unreachable };
   }
 
   // --- Места и меню --------------------------------------------------------
@@ -470,7 +497,8 @@ export function createFoodMock(opts: FoodMockOptions) {
     if (input.closesAt != null && !(/^\d{4}-\d{2}-\d{2}T([01]\d|2[0-3]):[0-5]\d$/.test(input.closesAt) && dateStr.safeParse(input.closesAt.slice(0, 10)).success)) {
       throw new Error("Проверь место, срок и адресатов.");
     }
-    const closesAt = input.closesAt ?? closesAtFromTime(input.closesTime ?? null, now.date);
+    // Время без даты у заказа — сегодня, как у `POST /api/orders` (не «ближайшее», как у опроса).
+    const closesAt = input.closesAt ?? (input.closesTime ? `${now.date}T${input.closesTime}` : null);
     // Тот же отказ и тот же текст, что у `POST /api/orders` на сервере.
     if (!isFutureClose(closesAt, now)) throw new Error("Время уже прошло — поставь позже или оставь пустым.");
     if (!isWithinCloseHorizon(closesAt, now.date)) throw new Error(`Срок — не дальше ${FOOD_CLOSE_HORIZON_DAYS} дней.`);
@@ -656,7 +684,7 @@ export function createFoodMock(opts: FoodMockOptions) {
   }
 
   return {
-    getTeamAudience, getPolls, getPoll, createPoll, votePoll, closePoll, cancelPoll,
+    getTeamAudience, getPolls, getPoll, createPoll, votePoll, closePoll, cancelPoll, remindPollSilent,
     getFoodPlaces, saveFoodPlace, archiveFoodPlace,
     getOrders, getOrder, createOrder, addOrderItem, setOrderItemQty, removeOrderItem, declineOrder,
     closeOrder, cancelOrder, setOrderPaid, setOrderPaymentFor, remindOrderUnpaid,

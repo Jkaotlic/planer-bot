@@ -223,6 +223,7 @@ describe("handover buttons", () => {
     await bot.handleUpdate(callbackUpdate(202, `handover:take:${handover.id}`));
 
     expect(getShift(db, work.id)?.employeeId).not.toBe(igor.id);
-    expect(answers.join(" ")).toContain("своя смена");
+    // Ответ кнопки называет мешающую запись — тот же текст, что пишет сервис.
+    expect(answers.join(" ")).toMatch(/У тебя в это время уже стоит: .* · 12:00–20:00 · /);
   });
 });

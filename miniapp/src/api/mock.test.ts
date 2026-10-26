@@ -1,9 +1,14 @@
-import { ADMIN_NOTICE_KINDS } from "@planer/shared";
-import { afterEach, describe, expect, it } from "vitest";
+import { ADMIN_NOTICE_KINDS, ASSIGN_REFUSAL_TEXT, entryLineOf } from "@planer/shared";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildTodayModel, buildWeekModel } from "../lib/team-schedule";
 import { addDays, mondayOf, toISODate } from "../lib/week";
 import {
   employeesMock,
+  mockAssignSlot,
+  mockCloseSlot,
+  mockPostSlot,
+  mockUnassignSlot,
+  mockGetAdminWeekendSlots,
   mockCreateEntry,
   mockCreateEntryRange,
   mockDeleteEntry,
@@ -579,12 +584,20 @@ describe("опросы: dev-мок", () => {
     expect(delivered).toBe(4);
   });
 
-  it("прошедший срок отклоняется тем же текстом, что и сервер (isFutureClose)", async () => {
-    const past = new Date(Date.now() - 5 * 60_000);
-    const pastTime = past.toTimeString().slice(0, 5);
-    await expect(
-      mockCreatePoll({ question: "Обед?", closesTime: pastTime, audience: { kind: "team" } }),
-    ).rejects.toThrow("Время уже прошло — поставь позже или оставь пустым.");
+  it("время, которое сегодня уже прошло, — завтрашнее, как у сервера (closesAtFromTime)", async () => {
+    // Часы мока — местные часы браузера; подменяем только `Date` (задержка мока
+    // на настоящем таймере), чтобы тест не зависел от того, когда его запустили:
+    // «сейчас − 5 минут» в 00:02 было бы вчерашним временем.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 9, 26, 12, 0));
+    try {
+      const { poll } = await mockCreatePoll({ question: "Обед?", closesTime: "08:00", audience: { kind: "team" } });
+      expect(poll.open).toBe(true);
+      expect(poll.closesAt).toBe("2026-10-27T08:00");
+      expect(poll.closes).toBe("до завтра, 08:00");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -798,5 +811,89 @@ describe("мок диапазона с заменой одного отсутс�
       employeeId: 1, from: "2099-03-02", to: "2099-03-02", category: "shift", start: "09:00", end: "18:00",
       mode: "rewrite", replaceAbsenceEntryId: entry.id,
     })).rejects.toThrow("Заменяемое отсутствие принадлежит другому человеку");
+  });
+});
+
+describe("назначение на выходной в dev-моке — как сервер", () => {
+  // Слоты мока стоят на днях текущей недели; в воскресенье субботний был бы уже
+  // «прошедшим». Часы ставятся на среду недели слота — тест не зависит от дня запуска.
+  async function onWednesdayOf(slotId: number): Promise<string> {
+    const date = (await mockGetAdminWeekendSlots()).find((s) => s.slot.id === slotId)!.slot.date;
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(`${date}T12:00:00Z`).getTime() - 3 * 86_400_000);
+    return date;
+  }
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("занятому отказывает фразой сервера — с той же строкой записи — и не ставит его на слот", async () => {
+    // Своя запись, а не сид: тесты выше правят общий массив записей. Ночь с
+    // пятницы 22:00–11:00 заходит в слот 301 (10:00–18:00).
+    const date = await onWednesdayOf(301);
+    const friday = new Date(`${date}T00:00:00Z`);
+    friday.setUTCDate(friday.getUTCDate() - 1);
+    const fridayIso = friday.toISOString().slice(0, 10);
+    const { entry } = await mockCreateEntry({ date: fridayIso, start: "22:00", end: "11:00", category: "shift", employeeId: 2 });
+    try {
+      await expect(mockAssignSlot(301, 2)).rejects.toThrow(
+        `в это время уже занят(а): ${entryLineOf({ ...entry, title: entry.title ?? null })}`,
+      );
+      const after = (await mockGetAdminWeekendSlots()).find((s) => s.slot.id === 301)!;
+      expect(after.assignees.map((a) => a.employeeId)).not.toContain(2);
+    } finally {
+      await mockDeleteEntry(entry.id);
+    }
+  });
+
+  it("назначение ставит запись «работа в выходной» в график, снятие — убирает; отпуск не мешает", async () => {
+    // Отпуск Марка (3) на этот день — пометка, а не запрет (решение 2026-07-30).
+    const date = await onWednesdayOf(301);
+    const { entry: vacation } = await mockCreateEntry({ date, category: "vacation", employeeId: 3 });
+    try {
+      await mockAssignSlot(301, 3);
+      const view = (await mockGetAdminWeekendSlots()).find((s) => s.slot.id === 301)!;
+      const mine = view.assignees.find((a) => a.employeeId === 3)!;
+      expect(mine).toBeDefined();
+      const work = (await mockGetTeamSchedule(date, date)).shifts.filter((s) => s.employeeId === 3 && s.category === "weekend_work");
+      expect(work).toHaveLength(1);
+      expect(work[0]).toMatchObject({ date, start: view.slot.start, end: view.slot.end, title: view.slot.title ?? "Работа в выходной" });
+
+      await mockUnassignSlot(mine.assignmentId);
+      expect((await mockGetTeamSchedule(date, date)).shifts.filter((s) => s.employeeId === 3 && s.category === "weekend_work")).toHaveLength(0);
+    } finally {
+      await mockDeleteEntry(vacation.id);
+    }
+  });
+
+  it("отказы — те же фразы, что у сервера", async () => {
+    await onWednesdayOf(301);
+    await expect(mockAssignSlot(999_999, 2)).rejects.toThrow(ASSIGN_REFUSAL_TEXT.not_found);
+    // Даша (4) не откликалась на слот 301.
+    await expect(mockAssignSlot(301, 4)).rejects.toThrow(ASSIGN_REFUSAL_TEXT.not_interested);
+
+    await employeesMock.setEmployeeRestrictions(2, { excludedFromAssignment: true });
+    try {
+      await expect(mockAssignSlot(301, 2)).rejects.toThrow(ASSIGN_REFUSAL_TEXT.excluded);
+    } finally {
+      await employeesMock.setEmployeeRestrictions(2, { excludedFromAssignment: false });
+    }
+
+    await employeesMock.archiveEmployee(2);
+    try {
+      await expect(mockAssignSlot(301, 2)).rejects.toThrow(ASSIGN_REFUSAL_TEXT.not_active);
+    } finally {
+      await employeesMock.restoreEmployee(2);
+    }
+
+    // Неделей позже слот уже прошёл.
+    vi.setSystemTime(Date.now() + 7 * 86_400_000);
+    await expect(mockAssignSlot(301, 2)).rejects.toThrow(ASSIGN_REFUSAL_TEXT.slot_passed);
+  });
+
+  it("закрытый слот — «набор закрыт»", async () => {
+    const posted = await mockPostSlot({ date: "2099-03-07", start: "10:00", end: "18:00" });
+    await mockCloseSlot(posted.id);
+    await expect(mockAssignSlot(posted.id, 2)).rejects.toThrow(ASSIGN_REFUSAL_TEXT.not_open);
   });
 });

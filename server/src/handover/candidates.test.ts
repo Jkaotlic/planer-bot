@@ -110,4 +110,16 @@ describe("who can be offered a shift", () => {
     db.insert(shifts).values({ date: "2026-08-12", category: "vacation", employeeId: igor }).run();
     expect(handoverCandidates(db, shift)).toEqual([]);
   });
+
+  it("не предлагает утреннюю смену тому, кто в это утро ещё на ночной (H7)", () => {
+    // Воспроизведение аудита 2026-10-26: ночь записана на вчерашнюю дату, и
+    // выборка «только дни смены» её не видела.
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    const igor = person(db, "Игорь");
+    const mark = person(db, "Марк");
+    entry(db, igor, { date: "2026-08-11", start: "22:00", end: "08:00" });
+    const shift = entry(db, anya, { date: "2026-08-12", start: "07:00", end: "16:00" });
+    expect(handoverCandidates(db, shift).map((e) => e.id)).toEqual([mark]);
+  });
 });

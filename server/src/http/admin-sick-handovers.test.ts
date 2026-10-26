@@ -254,7 +254,7 @@ describe("an admin replaces sick days with work through the range", () => {
   });
 
   it("split in the middle: the fan-out of the later piece moves onto the new row instead of dying", async () => {
-    const { db, app, sick, anya, igorToken } = await scene({ pending: false });
+    const { db, app, sent, sick, anya, igorToken } = await scene({ pending: false });
     db.update(shiftsTable).set({ endDate: day(3) }).where(eq(shiftsTable.id, sick.id)).run();
     const work3 = createShift(db, { date: day(3), start: "09:00", end: "18:00", category: "shift", title: "День", employeeId: anya.id });
     const handover3 = createHandover(db, { shiftId: work3.id, fromEmployeeId: anya.id, sickEntryId: sick.id, status: "fanned", escalatedAt: new Date() });
@@ -266,6 +266,44 @@ describe("an admin replaces sick days with work through the range", () => {
     expect(after.status).toBe("fanned");
     expect(after.sickEntryId).not.toBe(sick.id);
     expect(getShift(db, after.sickEntryId!)).toMatchObject({ date: day(3), endDate: null, category: "sick_leave" });
+    expect(sent.filter((m) => m.to === 403)).toHaveLength(0);
+  });
+
+  // H9 (аудит 2026-10-26): ждущий «ОК» кусок не одобрен, и перенос «на другой
+  // одобренный больничный» его не видит — передача гасла, а коллегам уходил
+  // «отбой» про человека, который по-прежнему болен. Одобренный разрез выше и
+  // этот ждущий закреплены вместе: кусок принимает передачу своих дней в обоих.
+  it("a PENDING sick leave split in the middle: the fan-out of the later piece moves onto it as is, colleagues hear nothing", async () => {
+    const { db, app, sent, sick, anya, igorToken } = await scene({ pending: true });
+    db.update(shiftsTable).set({ endDate: day(3) }).where(eq(shiftsTable.id, sick.id)).run();
+    const work3 = createShift(db, { date: day(3), start: "09:00", end: "18:00", category: "shift", title: "День", employeeId: anya.id });
+    const fannedAt = new Date(Date.now() - 3_600_000);
+    const handover3 = createHandover(db, {
+      shiftId: work3.id, fromEmployeeId: anya.id, sickEntryId: sick.id, status: "fanned", escalatedAt: fannedAt, fannedAt,
+    });
+
+    expect((await replace(app, igorToken, anya.id, day(2))).status).toBe(201);
+
+    const piece = db.select().from(shiftsTable).where(eq(shiftsTable.date, day(3))).all().find((r) => r.category === "sick_leave")!;
+    const after = getHandover(db, handover3.id)!;
+    expect(after.status).toBe("fanned");
+    expect(after.sickEntryId).toBe(piece.id);
+    // Перевешена, а не разослана заново: время рассылки — прежнее.
+    expect(after.fannedAt!.getTime()).toBe(Math.floor(fannedAt.getTime() / 1000) * 1000);
+    expect(sent.filter((m) => m.to === 403)).toHaveLength(0);
+  });
+
+  // Смена ушла другому — передача мертва, и разрез её не оживляет: гаснет, как гасла.
+  it("a split does not carry over a fan-out whose shift was reassigned", async () => {
+    const { db, app, sick, anya, marat, igorToken } = await scene({ pending: true });
+    db.update(shiftsTable).set({ endDate: day(3) }).where(eq(shiftsTable.id, sick.id)).run();
+    const work3 = createShift(db, { date: day(3), start: "09:00", end: "18:00", category: "shift", title: "День", employeeId: anya.id });
+    const handover3 = createHandover(db, { shiftId: work3.id, fromEmployeeId: anya.id, sickEntryId: sick.id, status: "fanned", escalatedAt: new Date() });
+    db.update(shiftsTable).set({ employeeId: marat.id }).where(eq(shiftsTable.id, work3.id)).run();
+
+    expect((await replace(app, igorToken, anya.id, day(2))).status).toBe(201);
+
+    expect(getHandover(db, handover3.id)!.status).toBe("cancelled");
   });
 
   it("a PENDING one-day sick leave replaced whole: the row is gone, the admins' buttons are closed, the fan-out is off", async () => {

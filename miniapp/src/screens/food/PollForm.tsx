@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Input, Textarea } from "@telegram-apps/telegram-ui";
-import { POLL_CHOICES_HINT, POLL_QUESTION_MAX, audienceReady, sendReportText, sendReportTitle, type FoodSendReport } from "@planer/shared";
+import { POLL_CHOICES_HINT, POLL_CLOSES_HINT, POLL_QUESTION_MAX, audienceReady, sendReportText, sendReportTitle, type FoodSendReport } from "@planer/shared";
 import { apiClient, type TeamAudience } from "../../api/client";
 import { AudiencePicker } from "../../components/AudiencePicker";
 import { ActionButton } from "../../ui";
@@ -63,6 +63,7 @@ export function PollForm({ onDone, onCancel }: { onDone(): void; onCancel(): voi
         onChange={(e) => setQuestion(e.target.value)} disabled={busy} />
       <Input header="Голосуем до (необязательно)" type="time" value={closesTime}
         onChange={(e) => setClosesTime(e.target.value)} disabled={busy} />
+      <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)" }}>{POLL_CLOSES_HINT}</div>
       <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)" }}>{POLL_CHOICES_HINT}</div>
       <AudiencePicker value={audience} onChange={setAudience} disabled={busy} />
       {error && <div style={{ color: "var(--tgui--destructive_text_color)", fontSize: "var(--app-text-meta)" }}>{error}</div>}
