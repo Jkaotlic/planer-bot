@@ -1,6 +1,7 @@
 import { shiftsOverlap, canSwap, shiftStartMs } from "@planer/shared";
 import type { Db } from "../db/client";
-import type { Handover, Shift } from "../db/schema";
+import { handovers, type Handover, type Shift } from "../db/schema";
+import { transition } from "../repo/transition";
 import { recordAudit } from "../repo/audit";
 import { safeErrorMessage } from "../util/safe-error";
 import { reachedNobody, scheduleLink, type AdminAction, type AdminReach } from "../bot/notify";
@@ -257,8 +258,17 @@ export async function fanOut(deps: HandoverDeps, handoverId: number): Promise<Ou
   const shift = shiftOf(db, handover);
   if (!shift) return { ok: false, reason: "Смены больше нет" };
 
+  // Веер — один раз на передачу. «Не могу» ждёт ответа Telegram на нажатие, тик —
+  // рассылки соседней передачи, и оба приходят сюда по одной строке. Проверка статуса выше
+  // и запись ниже раньше пропускали обоих, и команда получала «Кто может выйти?» дважды
+  // (H8). Рассылает только тот, чей условный переход `offered → fanned` прошёл; второму
+  // — «да», всех уже спросили. Намеренного повторного веера по `fanned` нет ни у тика
+  // (лестница веерит только `offered`), ни у маршрутов — параметра для него нет тоже.
+  if (!transition<Handover>(db, handovers, handoverId, ["offered"], { status: "fanned", offeredToEmployeeId: null })) {
+    return getHandover(db, handoverId)?.status === "fanned" ? { ok: true } : { ok: false, reason: "Передача уже закрыта" };
+  }
+  const updated = getHandover(db, handoverId)!;
   const recipients = handoverCandidates(db, shift, { excludeIds: listDeclines(db, handoverId) }).map((e) => e.id);
-  const updated = updateHandover(db, handoverId, { status: "fanned", offeredToEmployeeId: null })!;
   recordAudit(db, "handover_fanned", handover.fromEmployeeId, auditPayload(db, updated, shift, null));
   if (recipients.length > 0) {
     await deps.messenger.fan(

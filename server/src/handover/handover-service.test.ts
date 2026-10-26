@@ -246,12 +246,46 @@ describe("going straight to the fan-out", () => {
     shift(db, anya, "2026-08-12");
     const [handover] = await startHandovers(deps(db), { sickEntry: sick, employeeId: anya });
     await offerTo(deps(db), handover!.id, igor);
-    await declineHandover(deps(db), handover!.id, igor);
+    // Отказ записан, а веер ещё не ушёл — тот, что пустит тик или «Спросить всех».
+    addDecline(db, handover!.id, igor);
     sent = [];
 
     await fanOut(deps(db), handover!.id);
 
     expect(sent.map((m) => m.to)).toEqual([`employee:${mark}`]);
+  });
+
+  it("второй веер по уже разосланной передаче никому не пишет — всех уже спросили", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    person(db, "Игорь");
+    person(db, "Марк");
+    const sick = sickLeave(db, anya, "2026-08-12", "2026-08-12");
+    shift(db, anya, "2026-08-12");
+    const [handover] = await startHandovers(deps(db), { sickEntry: sick, employeeId: anya });
+    let fans = 0;
+    const counting = { ...deps(db), messenger: { ...deps(db).messenger, fan: async () => void (fans += 1) } };
+
+    const first = await fanOut(counting, handover!.id);
+    const second = await fanOut(counting, handover!.id);
+
+    expect(fans).toBe(1);
+    expect([first.ok, second.ok]).toEqual([true, true]);
+    expect(auditTypes(db).filter((t) => t === "handover_fanned")).toHaveLength(1);
+  });
+
+  it("веер по закрытой передаче отказывает словами и никому не пишет", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    const igor = person(db, "Игорь");
+    const sick = sickLeave(db, anya, "2026-08-12", "2026-08-12");
+    shift(db, anya, "2026-08-12");
+    const [handover] = await startHandovers(deps(db), { sickEntry: sick, employeeId: anya });
+    await takeHandover(deps(db), handover!.id, igor, TODAY);
+    sent = [];
+
+    expect(await fanOut(deps(db), handover!.id)).toEqual({ ok: false, reason: "Передача уже закрыта" });
+    expect(sent).toEqual([]);
   });
 });
 
@@ -288,6 +322,29 @@ describe("declining", () => {
     await declineHandover(deps(db), handover!.id, igor);
 
     expect(sent.map((m) => m.to)).toEqual([`employee:${mark}`]);
+  });
+
+  it("тик, сработавший, пока бот отвечал на «Не могу», — веер уходит один раз (H8)", async () => {
+    // Воспроизведение из аудита: ответ на нажатие ждёт Telegram, и в эту паузу тик
+    // успевает разослать ту же передачу; после ответа «Не могу» рассылало её второй раз.
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    const igor = person(db, "Игорь");
+    person(db, "Марк");
+    const sick = sickLeave(db, anya, "2026-08-12", "2026-08-12");
+    shift(db, anya, "2026-08-12");
+    const [handover] = await startHandovers(deps(db), { sickEntry: sick, employeeId: anya });
+    await offerTo(deps(db), handover!.id, igor);
+    let fans = 0;
+    const counting = { ...deps(db), messenger: { ...deps(db).messenger, fan: async () => void (fans += 1) } };
+
+    const result = await declineHandover(counting, handover!.id, igor, async () => {
+      await fanOut(counting, handover!.id);
+    });
+
+    expect(result.ok).toBe(true);
+    expect(fans).toBe(1);
+    expect(getHandover(db, handover!.id)?.status).toBe("fanned");
   });
 
   it("refuses a decline on a handover that is already resolved", async () => {
