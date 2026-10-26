@@ -1,5 +1,5 @@
 import { createEmployeesMock, createFoodMock, createReadMock } from "@planer/client";
-import { recipientGroupInputSchema, recipientGroupPatchSchema, RECIPIENT_GROUPS_MAX, QR_MAX_TEXT_LENGTH } from "@planer/shared";
+import { categoryLabel, entriesClash, weekendBusyRefusal, recipientGroupInputSchema, recipientGroupPatchSchema, RECIPIENT_GROUPS_MAX, QR_MAX_TEXT_LENGTH } from "@planer/shared";
 import type { QrSavedStyle, QrStyle } from "@planer/shared";
 import type { AdminShortfall, CoverageAcks, RecipientGroupView, SickApprovalRow, StartTab, TeamScheduleResponse } from "@planer/shared";
 import type { Category } from "../categories";
@@ -1034,6 +1034,17 @@ export async function mockAssignSlot(slotId: number, employeeId: number): Promis
   await delay(250);
   const view = ADMIN_SLOTS.find((s) => s.slot.id === slotId);
   if (!view || view.assignees.some((a) => a.employeeId === employeeId)) return;
+  // Как сервер (`assignSlot` → `busyWith`): своя смена в эти часы, включая ночь
+  // накануне, — отказ той же фразой; отпуск — пометка, а не запрет. Без этого
+  // dev-мок молча ставил человека поверх его же смены, и ветку отказа на экране
+  // нельзя было увидеть, не поднимая сервер.
+  const clash = ALL_ENTRIES.find(
+    (s) => s.employeeId === employeeId && !isAbsence(s.category) && entriesClash(s, view.slot),
+  );
+  if (clash) {
+    const time = clash.start != null && clash.end != null ? `${clash.start}–${clash.end}` : "весь день";
+    throw new Error(weekendBusyRefusal(personName(employeeId), `${clash.date} · ${time} · ${clash.title ?? categoryLabel(clash.category)}`));
+  }
   // The slot stays open — it may need more than one person.
   view.assignees.push({ assignmentId: nextAssignmentId++, employeeId, name: personName(employeeId), status: "offered" });
   // Mirror the real flow's eventual outcome so the payroll ledger updates too.

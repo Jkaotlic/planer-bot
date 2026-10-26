@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   employeesMock,
+  mockAssignSlot,
+  mockUnassignSlot,
+  mockGetWeekendSlots,
   mockCreateEntry,
   mockCreateEntryRange,
   mockDeleteEntry,
@@ -195,6 +198,43 @@ describe("мок консоли: диапазон с заменой одного
     } finally {
       const left = (await mockGetTeamSchedule("2099-03-01", "2099-03-08")).filter((s) => s.employeeId === 1 || s.employeeId === 2);
       await Promise.all(left.filter((s) => s.date >= "2099-03-01").map((s) => mockDeleteEntry(s.id)));
+    }
+  });
+});
+
+describe("назначение на выходной в dev-моке — как сервер", () => {
+  it("занятому отказывает фразой сервера и не ставит его на слот", async () => {
+    // Своя запись, а не сид: тесты выше правят общий массив записей, и на
+    // субботнюю смену из сида здесь полагаться нельзя. Ночь с пятницы 22:00–11:00
+    // заходит в слот 201 (10:00–18:00) — та же ночь накануне, что у сервера.
+    const view = (await mockGetWeekendSlots()).find((s) => s.slot.id === 201)!;
+    const friday = new Date(`${view.slot.date}T00:00:00Z`);
+    friday.setUTCDate(friday.getUTCDate() - 1);
+    const { entry } = await mockCreateEntry({
+      date: friday.toISOString().slice(0, 10), start: "22:00", end: "11:00", category: "shift", employeeId: 4,
+    });
+    try {
+      await expect(mockAssignSlot(201, 4)).rejects.toThrow(/^У .+ в это время уже стоит: .*22:00–11:00/);
+      const after = (await mockGetWeekendSlots()).find((s) => s.slot.id === 201)!;
+      expect(after.assignees.map((a) => a.employeeId)).not.toContain(4);
+    } finally {
+      await mockDeleteEntry(entry.id);
+    }
+  });
+
+  it("отпуск — пометка, а не запрет: человека в отпуске назначает", async () => {
+    // У Марка (3) в субботу смен нет; отпуск на этот день решение 2026-07-30
+    // считает пометкой («иногда человек сам просит выйти из отпуска»).
+    const view = (await mockGetWeekendSlots()).find((s) => s.slot.id === 201)!;
+    const { entry } = await mockCreateEntry({ date: view.slot.date, category: "vacation", employeeId: 3 });
+    try {
+      await mockAssignSlot(201, 3);
+      const after = (await mockGetWeekendSlots()).find((s) => s.slot.id === 201)!;
+      const mine = after.assignees.find((a) => a.employeeId === 3)!;
+      expect(mine).toBeDefined();
+      await mockUnassignSlot(mine.assignmentId);
+    } finally {
+      await mockDeleteEntry(entry.id);
     }
   });
 });

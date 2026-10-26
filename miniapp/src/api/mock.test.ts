@@ -4,6 +4,9 @@ import { buildTodayModel, buildWeekModel } from "../lib/team-schedule";
 import { addDays, mondayOf, toISODate } from "../lib/week";
 import {
   employeesMock,
+  mockAssignSlot,
+  mockUnassignSlot,
+  mockGetAdminWeekendSlots,
   mockCreateEntry,
   mockCreateEntryRange,
   mockDeleteEntry,
@@ -806,5 +809,42 @@ describe("мок диапазона с заменой одного отсутс�
       employeeId: 1, from: "2099-03-02", to: "2099-03-02", category: "shift", start: "09:00", end: "18:00",
       mode: "rewrite", replaceAbsenceEntryId: entry.id,
     })).rejects.toThrow("Заменяемое отсутствие принадлежит другому человеку");
+  });
+});
+
+describe("назначение на выходной в dev-моке — как сервер", () => {
+  it("занятому отказывает фразой сервера и не ставит его на слот", async () => {
+    // Своя запись, а не сид: тесты выше правят общий массив записей, и на
+    // субботнюю смену из сида здесь полагаться нельзя. Ночь с пятницы 22:00–11:00
+    // заходит в слот 301 (10:00–18:00) — та же ночь накануне, что у сервера.
+    const view = (await mockGetAdminWeekendSlots()).find((s) => s.slot.id === 301)!;
+    const friday = new Date(`${view.slot.date}T00:00:00Z`);
+    friday.setUTCDate(friday.getUTCDate() - 1);
+    const { entry } = await mockCreateEntry({
+      date: friday.toISOString().slice(0, 10), start: "22:00", end: "11:00", category: "shift", employeeId: 4,
+    });
+    try {
+      await expect(mockAssignSlot(301, 4)).rejects.toThrow(/^У .+ в это время уже стоит: .*22:00–11:00/);
+      const after = (await mockGetAdminWeekendSlots()).find((s) => s.slot.id === 301)!;
+      expect(after.assignees.map((a) => a.employeeId)).not.toContain(4);
+    } finally {
+      await mockDeleteEntry(entry.id);
+    }
+  });
+
+  it("отпуск — пометка, а не запрет: человека в отпуске назначает", async () => {
+    // У Марка (3) в субботу смен нет; отпуск на этот день решение 2026-07-30
+    // считает пометкой («иногда человек сам просит выйти из отпуска»).
+    const view = (await mockGetAdminWeekendSlots()).find((s) => s.slot.id === 301)!;
+    const { entry } = await mockCreateEntry({ date: view.slot.date, category: "vacation", employeeId: 3 });
+    try {
+      await mockAssignSlot(301, 3);
+      const after = (await mockGetAdminWeekendSlots()).find((s) => s.slot.id === 301)!;
+      const mine = after.assignees.find((a) => a.employeeId === 3)!;
+      expect(mine).toBeDefined();
+      await mockUnassignSlot(mine.assignmentId);
+    } finally {
+      await mockDeleteEntry(entry.id);
+    }
   });
 });
