@@ -24,6 +24,7 @@ import { installLogTimestamps } from "./util/log-time";
 import { createTickScheduler } from "./util/ticks";
 import { runWeekendNudgeTick } from "./weekend/weekend-nudge";
 import { runFoodTick } from "./food/food-tick";
+import { runSickApprovalReminderTick } from "./sick-approval/sick-approval-service";
 
 // Первым делом, до чтения конфига: сорваться можно уже на нём, а сорванный дамп
 // печатает Node сам и несёт в логе токен бота открытым текстом.
@@ -85,6 +86,9 @@ const tickRound = createTickScheduler([
     { name: "swaps", run: () => runSwapExpiryTick(db, bot, teamNow(config.teamTz)) },
     // Выходной без ответа за два дня до слота — админам одно письмо.
     { name: "weekend-nudge", run: () => runWeekendNudgeTick(db, bot, teamNow(config.teamTz), config.publicUrl, config.teamTz) },
+    // Больничный без «ОК» дольше четырёх часов — админам одно напоминание.
+    // Возраст запроса — момент UTC, поэтому без `teamNow`: время берёт сам тик.
+    { name: "sick-approval-remind", run: () => runSickApprovalReminderTick(db, bot) },
     // Закрытие просроченных опросов (и, с Задачи 13, заказов) — тем же
     // пятиминутным тиком, что и остальные: своего таймера не заводит.
     { name: "food", run: () => runFoodTick(db, bot, teamNow(config.teamTz), config.publicUrl) },
