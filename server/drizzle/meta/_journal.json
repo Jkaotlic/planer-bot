@@ -323,6 +323,13 @@
       "when": 1792050684152,
       "tag": "0045_order_item_change_seq",
       "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "6",
+      "when": 1793009848323,
+      "tag": "0046_handover_fanned_at",
+      "breakpoints": true
     }
   ]
 }

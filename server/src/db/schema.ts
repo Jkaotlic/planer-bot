@@ -296,6 +296,13 @@ export const handovers = sqliteTable("handovers", {
    * write to the admins every five minutes.
    */
   escalatedAt: integer({ mode: "timestamp" }),
+  /**
+   * When «Кто может выйти?» really went to somebody. NOT the same as `status = fanned`:
+   * the escalation «свободных нет» sets `fanned` with nobody written to, and a later
+   * «Спросить всех» must still reach whoever has become free. The fan-out's conditional
+   * transition admits `fanned` only while this is null — that is what makes it fire once.
+   */
+  fannedAt: integer({ mode: "timestamp" }),
   takenByEmployeeId: integer().references(() => employees.id),
   resolvedAt: integer({ mode: "timestamp" }),
 });

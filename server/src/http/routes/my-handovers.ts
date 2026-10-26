@@ -108,7 +108,9 @@ export function createMyHandoverRoutes(deps: { db: Db; config: Config; bot?: Bot
     // уходит всем свободным.
     const res = await fanOut(serviceDeps(), handover.id);
     if (!res.ok) return c.json({ error: res.reason }, 400);
-    return c.json({ ok: true });
+    // `sent: false` — спрашивать было некого или уже спросили: «да» без этого признака
+    // читалось бы как «разослали», а не ушло ни одного письма.
+    return c.json({ ok: true, sent: res.sent });
   });
 
   return routes;

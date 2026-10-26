@@ -1,4 +1,5 @@
 import { canSwap, shiftStartMs } from "@planer/shared";
+import { eq, isNull, or } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { handovers, type Handover, type Shift } from "../db/schema";
 import { transition } from "../repo/transition";
@@ -249,8 +250,11 @@ export async function offerTo(deps: HandoverDeps, handoverId: number, toEmployee
   return { ok: true };
 }
 
+/** `sent` — ушло ли «Кто может выйти?» хоть кому-то: экран не должен говорить «спросили», когда не спросили. */
+export type FanOutcome = { ok: true; sent: boolean } | { ok: false; reason: string };
+
 /** Nobody in particular any more — everybody still free gets asked. */
-export async function fanOut(deps: HandoverDeps, handoverId: number): Promise<Outcome> {
+export async function fanOut(deps: HandoverDeps, handoverId: number): Promise<FanOutcome> {
   const { db } = deps;
   const handover = getHandover(db, handoverId);
   if (!handover || (handover.status !== "offered" && handover.status !== "fanned")) {
@@ -262,23 +266,40 @@ export async function fanOut(deps: HandoverDeps, handoverId: number): Promise<Ou
   // Веер — один раз на передачу. «Не могу» ждёт ответа Telegram на нажатие, тик —
   // рассылки соседней передачи, и оба приходят сюда по одной строке. Проверка статуса выше
   // и запись ниже раньше пропускали обоих, и команда получала «Кто может выйти?» дважды
-  // (H8). Рассылает только тот, чей условный переход `offered → fanned` прошёл; второму
-  // — «да», всех уже спросили. Намеренного повторного веера по `fanned` нет ни у тика
-  // (лестница веерит только `offered`), ни у маршрутов — параметра для него нет тоже.
-  if (!transition<Handover>(db, handovers, handoverId, ["offered"], { status: "fanned", offeredToEmployeeId: null })) {
-    return getHandover(db, handoverId)?.status === "fanned" ? { ok: true } : { ok: false, reason: "Передача уже закрыта" };
+  // (H8). Рассылает только тот, чей условный переход прошёл; второму — `sent: false`.
+  //
+  // «Уже разослано» — это `fannedAt`, а не статус: эскалация «свободных нет» ставит
+  // `fanned`, никому не написав, и «Спросить всех» по ней обязан дойти до того, кто с тех
+  // пор освободился. Поэтому переход принимает `offered` (в том числе новый круг после
+  // личного предложения) и `fanned` без `fannedAt`. Круг считается до перехода — без
+  // await между ними, — и пустой круг `fannedAt` не ставит: никого не спросили, дорога
+  // следующему вееру открыта.
+  const recipients = handoverCandidates(db, shift, { excludeIds: listDeclines(db, handoverId) }).map((e) => e.id);
+  const sending = recipients.length > 0;
+  const moved = transition<Handover>(
+    db,
+    handovers,
+    handoverId,
+    ["offered", "fanned"],
+    { status: "fanned", offeredToEmployeeId: null, fannedAt: sending ? new Date() : null },
+    or(eq(handovers.status, "offered"), isNull(handovers.fannedAt)),
+  );
+  if (!moved) {
+    return getHandover(db, handoverId)?.status === "fanned" ? { ok: true, sent: false } : { ok: false, reason: "Передача уже закрыта" };
   }
   const updated = getHandover(db, handoverId)!;
-  const recipients = handoverCandidates(db, shift, { excludeIds: listDeclines(db, handoverId) }).map((e) => e.id);
-  recordAudit(db, "handover_fanned", handover.fromEmployeeId, auditPayload(db, updated, shift, null));
-  if (recipients.length > 0) {
+  // Пустой круг по уже `fanned` ничего не меняет — строка в журнале была бы о несостоявшемся.
+  if (sending || handover.status === "offered") {
+    recordAudit(db, "handover_fanned", handover.fromEmployeeId, auditPayload(db, updated, shift, null));
+  }
+  if (sending) {
     await deps.messenger.fan(
       recipients,
       handoverId,
       handoverFanText(nameOf(db, handover.fromEmployeeId) ?? "Коллега", lineOf(shift)),
     );
   }
-  return { ok: true };
+  return { ok: true, sent: sending };
 }
 
 /**

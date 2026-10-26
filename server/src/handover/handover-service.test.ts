@@ -270,8 +270,69 @@ describe("going straight to the fan-out", () => {
     const second = await fanOut(counting, handover!.id);
 
     expect(fans).toBe(1);
-    expect([first.ok, second.ok]).toEqual([true, true]);
+    expect([first, second]).toEqual([{ ok: true, sent: true }, { ok: true, sent: false }]);
     expect(auditTypes(db).filter((t) => t === "handover_fanned")).toHaveLength(1);
+  });
+
+  it("передача, эскалированная без веера (свободных не было), — «Спросить всех» рассылает её, когда свободный появился", async () => {
+    // Эскалация «свободных нет» ставит `fanned`, но никому не пишет. Если веер считать
+    // по статусу, «Спросить всех» по ней стал бы молчаливым «да» — смена так и висит.
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    const sick = sickLeave(db, anya, "2026-08-12", "2026-08-12");
+    shift(db, anya, "2026-08-12");
+    const [handover] = await startHandovers(deps(db), { sickEntry: sick, employeeId: anya });
+    expect(getHandover(db, handover!.id)?.status).toBe("fanned");
+    const igor = person(db, "Игорь");
+    const fans: number[][] = [];
+    const counting = { ...deps(db), messenger: { ...deps(db).messenger, fan: async (ids: readonly number[]) => void fans.push([...ids]) } };
+
+    const first = await fanOut(counting, handover!.id);
+    const second = await fanOut(counting, handover!.id);
+
+    expect(fans).toEqual([[igor]]);
+    expect([first, second]).toEqual([{ ok: true, sent: true }, { ok: true, sent: false }]);
+  });
+
+  it("веер, которому некого спросить, говорит «не отправлено» — и не закрывает дорогу следующему", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    const igor = person(db, "Игорь");
+    const sick = sickLeave(db, anya, "2026-08-12", "2026-08-12");
+    shift(db, anya, "2026-08-12");
+    const [handover] = await startHandovers(deps(db), { sickEntry: sick, employeeId: anya });
+    // Игорь отказался раньше — круг пуст.
+    addDecline(db, handover!.id, igor);
+    const mark = person(db, "Марк");
+    addDecline(db, handover!.id, mark);
+    let fans = 0;
+    const counting = { ...deps(db), messenger: { ...deps(db).messenger, fan: async () => void (fans += 1) } };
+
+    expect(await fanOut(counting, handover!.id)).toEqual({ ok: true, sent: false });
+    expect(fans).toBe(0);
+    expect(getHandover(db, handover!.id)?.status).toBe("fanned");
+
+    // Освободилась Даша — веера ещё не было, значит, он ещё впереди.
+    person(db, "Даша");
+    expect(await fanOut(counting, handover!.id)).toEqual({ ok: true, sent: true });
+    expect(fans).toBe(1);
+  });
+
+  it("передачу, которую после веера предложили лично, снова можно разослать — это новый круг", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    const igor = person(db, "Игорь");
+    person(db, "Марк");
+    const sick = sickLeave(db, anya, "2026-08-12", "2026-08-12");
+    shift(db, anya, "2026-08-12");
+    const [handover] = await startHandovers(deps(db), { sickEntry: sick, employeeId: anya });
+    let fans = 0;
+    const counting = { ...deps(db), messenger: { ...deps(db).messenger, fan: async () => void (fans += 1) } };
+    await fanOut(counting, handover!.id);
+    await offerTo(counting, handover!.id, igor);
+
+    expect(await fanOut(counting, handover!.id)).toEqual({ ok: true, sent: true });
+    expect(fans).toBe(2);
   });
 
   it("веер по закрытой передаче отказывает словами и никому не пишет", async () => {
