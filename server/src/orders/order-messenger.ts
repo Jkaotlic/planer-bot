@@ -157,7 +157,10 @@ export async function sendOrderInvites(bot: Bot, db: Db, order: FoodOrder, now: 
 export async function finishOrderMessages(
   bot: Bot, db: Db, order: FoodOrder, reason: "closed" | "cancelled", _publicUrl: string,
 ): Promise<void> {
-  const { rows, byId } = names(db, order);
+  const { rows: all, byId } = names(db, order);
+  // Имена — всех (сводка называет и архивного должника), письма — только тем,
+  // кто ещё в команде.
+  const rows = all.filter((r) => r.isActive);
   for (const r of rows) {
     if (r.telegramUserId == null || r.messageId == null) continue;
     try {

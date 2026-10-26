@@ -16,7 +16,9 @@ function debtorRows(db: Db, order: FoodOrder) {
   const recipients = orderRecipientRows(db, order.id);
   return debtors(itemsOf(db, order.id), order.createdBy).map((d) => {
     const r = recipients.find((x) => x.employeeId === d.employeeId);
-    return { employeeId: d.employeeId, displayName: r?.displayName ?? "—", telegramUserId: r?.telegramUserId ?? null, amount: d.amount };
+    // Архивному писать нельзя: для дожима он «не достучаться», а не «дошло».
+    const telegramUserId = r?.isActive ? r.telegramUserId : null;
+    return { employeeId: d.employeeId, displayName: r?.displayName ?? "—", telegramUserId, amount: d.amount };
   });
 }
 

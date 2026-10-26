@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { makeTestDb } from "../db/testdb";
-import { createEmployee, linkTelegramAccount } from "../repo/employees";
+import { archiveEmployee, createEmployee, linkTelegramAccount, restoreEmployee } from "../repo/employees";
 import { recordApi, silentBot } from "../bot/testbot";
 import type { Db } from "../db/client";
 import { archivePlace, createPlace } from "./place-service";
@@ -124,6 +124,53 @@ describe("рассылка заказа", () => {
     const { db, place, order } = stage();
     archivePlace(db, place.id);
     expect(orderMenu(db, order).map((m) => m.name)).toEqual(["Шаурма", "Чай"]);
+  });
+});
+
+describe("архивный адресат заказа", () => {
+  // Игорь успел заказать и ушёл из команды до закрытия: писем ему больше нет,
+  // но его шаурма уже в заказе, и запускающий должен видеть, кто её должен.
+  async function stageArchived() {
+    const s = stage();
+    await sendOrderInvites(silentBot().bot, s.db, s.order, now, URL);
+    addMenuItem(s.db, s.order, s.igor.id, s.place.menu[0]!.id, now);
+    archiveEmployee(s.db, s.igor.id, now.date);
+    const { bot } = silentBot();
+    const api = recordApi(bot);
+    return { ...s, bot, api };
+  }
+
+  it("при закрытии архивному ни гашения, ни «сдай»; в сводке запускающему он с долгом", async () => {
+    const { db, anya, order, bot, api } = await stageArchived();
+    closeOrder(db, order, anya);
+    await finishOrderMessages(bot, db, getOrder(db, order.id)!, "closed", URL);
+    expect(api.calls.filter((c) => c.payload?.chat_id === 101)).toEqual([]);
+    const summary = api.sent.filter((m) => m.chat_id === 100).map((m) => m.text).join("\n");
+    expect(summary).toContain(`Игорь — ${formatMoney(350)}`);
+  });
+
+  it("отмена не уходит архивному", async () => {
+    const { db, anya, order, bot, api } = await stageArchived();
+    await finishOrderMessages(bot, db, { ...order, cancelledAt: new Date() }, "cancelled", URL);
+    expect(api.calls.filter((c) => c.payload?.chat_id === 101)).toEqual([]);
+    expect(api.sent.map((m) => m.chat_id).sort()).toEqual([100, 102]);
+    void anya;
+  });
+
+  it("«Напомнить не сдавшим» архивному не пишет и называет его среди недошедших", async () => {
+    const { db, anya, order, bot, api } = await stageArchived();
+    closeOrder(db, order, anya);
+    const result = await remindUnpaid(bot, db, getOrder(db, order.id)!);
+    expect(api.calls.filter((c) => c.payload?.chat_id === 101)).toEqual([]);
+    expect(result).toEqual({ delivered: 0, unpaid: 1, unreachable: ["Игорь"] });
+  });
+
+  it("вернули из архива до итога — снова получает «сдай»", async () => {
+    const { db, anya, igor, order, bot, api } = await stageArchived();
+    restoreEmployee(db, igor.id);
+    closeOrder(db, order, anya);
+    await finishOrderMessages(bot, db, getOrder(db, order.id)!, "closed", URL);
+    expect(api.sent.filter((m) => m.text.startsWith("💸")).map((m) => m.chat_id)).toEqual([101]);
   });
 });
 
