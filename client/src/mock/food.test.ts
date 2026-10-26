@@ -217,3 +217,44 @@ describe("createFoodMock: «Напомнить молчащим» — как POS
     await expect(mock.remindPollSilent(other.id)).rejects.toThrow("Опрос закрыт — напоминать уже не о чем.");
   });
 });
+
+describe("createFoodMock: опрос — как сервер после архивации и при закрытии", () => {
+  it("архивный адресат не стоит в итоге и не считается в адресатах — как pollRecipientRows", async () => {
+    const people: FoodMockPerson[] = PEOPLE.map((p) => ({ ...p }));
+    const state = { employees: people, me: { id: 1, isAdmin: false } };
+    const mock = createFoodMock({ delayMs: 0, state, now: () => ({ date: "2026-10-06", time: "12:00" }) });
+    const { poll } = await mock.createPoll({ question: "Обед?", closesTime: null, audience: { kind: "picked", employeeIds: [2, 3] } });
+    expect(poll.tally.silent).toEqual(["Аня", "Игорь", "Марк", "Лена"]);
+    people[1] = { ...people[1]!, isActive: false }; // Игорь ушёл в архив
+    const after = await mock.getPoll(poll.id);
+    expect(after.tally.silent).toEqual(["Аня", "Марк", "Лена"]);
+    expect(after.recipientCount).toBe(3);
+    // Вернули из архива — снова адресат, строка не удалялась.
+    people[1] = { ...people[1]!, isActive: true };
+    expect((await mock.getPoll(poll.id)).tally.silent).toContain("Игорь");
+  });
+
+  it("закрыть и отменить чужой — те же отказы, что у сервера; админ — может", async () => {
+    const { state, mock } = mockAs({ id: 1, isAdmin: false });
+    const { poll } = await mock.createPoll({ question: "Обед?", closesTime: null, audience: { kind: "team" } });
+    state.me = { id: 2, isAdmin: false };
+    await expect(mock.closePoll(poll.id)).rejects.toThrow("Закрыть может только тот, кто запустил опрос.");
+    await expect(mock.cancelPoll(poll.id)).rejects.toThrow("Отменить может только тот, кто запустил опрос.");
+    expect((await mock.getPoll(poll.id)).open).toBe(true);
+    state.me = { id: 4, isAdmin: true };
+    expect((await mock.closePoll(poll.id)).open).toBe(false);
+  });
+
+  it("повторное закрытие и отмена закрытого — «Опрос уже закрыт.»; закрыть отменённый — «Опрос отменён.»", async () => {
+    const { mock } = mockAs({ id: 1, isAdmin: false });
+    const { poll } = await mock.createPoll({ question: "Обед?", closesTime: null, audience: { kind: "team" } });
+    await mock.closePoll(poll.id);
+    await expect(mock.closePoll(poll.id)).rejects.toThrow("Опрос уже закрыт.");
+    await expect(mock.cancelPoll(poll.id)).rejects.toThrow("Опрос уже закрыт.");
+    expect((await mock.getPoll(poll.id)).cancelled).toBe(false);
+    const { poll: other } = await mock.createPoll({ question: "Ужин?", closesTime: null, audience: { kind: "team" } });
+    await mock.cancelPoll(other.id);
+    await expect(mock.closePoll(other.id)).rejects.toThrow("Опрос отменён.");
+    await expect(mock.cancelPoll(other.id)).rejects.toThrow("Опрос уже закрыт.");
+  });
+});

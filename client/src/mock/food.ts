@@ -94,7 +94,12 @@ export function createFoodMock(opts: FoodMockOptions) {
 
   function pollViewOf(p: MockPoll): PollView {
     const now = clock();
-    const people = p.recipients.map((id) => ({ employeeId: id, displayName: staff().find((e) => e.id === id)?.displayName ?? "—" }));
+    // Только те, кто ещё в команде, — как `pollRecipientRows` сервера: архивный не
+    // стоит в «Не ответили», а вернули из архива — снова адресат (id из списка не удаляется).
+    const people = p.recipients
+      .map((id) => staff().find((e) => e.id === id))
+      .filter((e): e is FoodMockPerson => e != null && e.isActive)
+      .map((e) => ({ employeeId: e.id, displayName: e.displayName }));
     return {
       id: p.id,
       question: p.question,
@@ -108,7 +113,7 @@ export function createFoodMock(opts: FoodMockOptions) {
       canManage: p.createdBy === me().id || me().isAdmin,
       myChoice: p.votes.get(me().id) ?? null,
       tally: pollTally(people, [...p.votes].map(([employeeId, choice]) => ({ employeeId, choice }))),
-      recipientCount: p.recipients.length,
+      recipientCount: people.length,
     };
   }
 
@@ -216,16 +221,25 @@ export function createFoodMock(opts: FoodMockOptions) {
     return pollViewOf(p);
   }
 
+  const canManagePoll = (p: MockPoll) => p.createdBy === me().id || me().isAdmin;
+
+  /** Те же отказы и тот же порядок, что у `closePoll` сервера: права, «отменён», «уже закрыт». */
   async function closePoll(id: number): Promise<PollView> {
     await wait();
     const p = pollOrThrow(id);
+    if (!canManagePoll(p)) throw new Error("Закрыть может только тот, кто запустил опрос.");
+    if (p.cancelledAt != null) throw new Error("Опрос отменён.");
+    if (p.closedAt != null) throw new Error("Опрос уже закрыт.");
     p.closedAt = new Date().toISOString();
     return pollViewOf(p);
   }
 
+  /** Как `cancelPoll` сервера: права, потом «уже закрыт» — и для закрытого, и для отменённого. */
   async function cancelPoll(id: number): Promise<PollView> {
     await wait();
     const p = pollOrThrow(id);
+    if (!canManagePoll(p)) throw new Error("Отменить может только тот, кто запустил опрос.");
+    if (p.closedAt != null || p.cancelledAt != null) throw new Error("Опрос уже закрыт.");
     p.cancelledAt = new Date().toISOString();
     return pollViewOf(p);
   }
@@ -236,7 +250,7 @@ export function createFoodMock(opts: FoodMockOptions) {
   async function remindPollSilent(id: number): Promise<PollRemindResult> {
     await wait();
     const p = pollOrThrow(id);
-    if (!(p.createdBy === me().id || me().isAdmin)) throw new Error("Напомнить может только тот, кто запустил опрос.");
+    if (!canManagePoll(p)) throw new Error("Напомнить может только тот, кто запустил опрос.");
     if (p.cancelledAt != null) throw new Error("Опрос отменён — напоминать не о чем.");
     if (!isOpenAt(p, clock())) throw new Error("Опрос закрыт — напоминать уже не о чем.");
     const silent = p.recipients
