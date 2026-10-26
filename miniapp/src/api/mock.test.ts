@@ -1,5 +1,5 @@
 import { ADMIN_NOTICE_KINDS } from "@planer/shared";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildTodayModel, buildWeekModel } from "../lib/team-schedule";
 import { addDays, mondayOf, toISODate } from "../lib/week";
 import {
@@ -580,11 +580,19 @@ describe("опросы: dev-мок", () => {
   });
 
   it("время, которое сегодня уже прошло, — завтрашнее, как у сервера (closesAtFromTime)", async () => {
-    const past = new Date(Date.now() - 5 * 60_000);
-    const pastTime = past.toTimeString().slice(0, 5);
-    const { poll } = await mockCreatePoll({ question: "Обед?", closesTime: pastTime, audience: { kind: "team" } });
-    expect(poll.open).toBe(true);
-    expect(poll.closes).toBe(`до завтра, ${pastTime}`);
+    // Часы мока — местные часы браузера; подменяем только `Date` (задержка мока
+    // на настоящем таймере), чтобы тест не зависел от того, когда его запустили:
+    // «сейчас − 5 минут» в 00:02 было бы вчерашним временем.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 9, 26, 12, 0));
+    try {
+      const { poll } = await mockCreatePoll({ question: "Обед?", closesTime: "08:00", audience: { kind: "team" } });
+      expect(poll.open).toBe(true);
+      expect(poll.closesAt).toBe("2026-10-27T08:00");
+      expect(poll.closes).toBe("до завтра, 08:00");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
