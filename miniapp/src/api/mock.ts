@@ -1,5 +1,5 @@
 import { createEmployeesMock, createFoodMock, createReadMock } from "@planer/client";
-import { categoryLabel, entriesClash, weekendBusyRefusal, recipientGroupInputSchema, recipientGroupPatchSchema, RECIPIENT_GROUPS_MAX, QR_MAX_TEXT_LENGTH } from "@planer/shared";
+import { ASSIGN_REFUSAL_TEXT, entriesClash, entryLineOf, takesPartInAssignment, weekendBusyRefusal, recipientGroupInputSchema, recipientGroupPatchSchema, RECIPIENT_GROUPS_MAX, QR_MAX_TEXT_LENGTH } from "@planer/shared";
 import type { QrSavedStyle, QrStyle } from "@planer/shared";
 import type { AdminShortfall, CoverageAcks, RecipientGroupView, SickApprovalRow, StartTab, TeamScheduleResponse } from "@planer/shared";
 import type { Category } from "../categories";
@@ -1029,25 +1029,48 @@ export async function mockPostSlot(input: NewSlotInput): Promise<VacantSlot & { 
 }
 
 let nextAssignmentId = 900;
+/** Назначение → его запись в графике мока, чтобы снятие убирало ровно её. */
+const WEEKEND_ENTRY_OF = new Map<number, number>();
 
+/**
+ * Как сервер (`assignSlot`): те же проверки в том же порядке и те же фразы
+ * (`ASSIGN_REFUSAL_TEXT`, `weekendBusyRefusal` + `entryLineOf`), и запись
+ * «Работа в выходной» в графике. Без этого dev-мок молча ставил человека поверх
+ * его смены, а ветки отказа на экране нельзя было увидеть, не поднимая сервер.
+ * Календаря мок не ведёт, поэтому `not_weekend` здесь не бывает.
+ */
 export async function mockAssignSlot(slotId: number, employeeId: number): Promise<void> {
   await delay(250);
   const view = ADMIN_SLOTS.find((s) => s.slot.id === slotId);
-  if (!view || view.assignees.some((a) => a.employeeId === employeeId)) return;
-  // Как сервер (`assignSlot` → `busyWith`): своя смена в эти часы, включая ночь
-  // накануне, — отказ той же фразой; отпуск — пометка, а не запрет. Без этого
-  // dev-мок молча ставил человека поверх его же смены, и ветку отказа на экране
-  // нельзя было увидеть, не поднимая сервер.
-  const clash = ALL_ENTRIES.find(
-    (s) => s.employeeId === employeeId && !isAbsence(s.category) && entriesClash(s, view.slot),
-  );
-  if (clash) {
-    const time = clash.start != null && clash.end != null ? `${clash.start}–${clash.end}` : "весь день";
-    throw new Error(weekendBusyRefusal(personName(employeeId), `${clash.date} · ${time} · ${clash.title ?? categoryLabel(clash.category)}`));
-  }
+  if (!view) throw new Error(ASSIGN_REFUSAL_TEXT.not_found);
+  if (view.slot.status === "closed") throw new Error(ASSIGN_REFUSAL_TEXT.not_open);
+  if (view.slot.date < toISODate(new Date())) throw new Error(ASSIGN_REFUSAL_TEXT.slot_passed);
+  const person = EMPLOYEES.find((e) => e.id === employeeId);
+  if (!person?.isActive) throw new Error(ASSIGN_REFUSAL_TEXT.not_active);
+  if (!takesPartInAssignment(person)) throw new Error(ASSIGN_REFUSAL_TEXT.excluded);
+  if (!view.interested.some((i) => i.employeeId === employeeId)) throw new Error(ASSIGN_REFUSAL_TEXT.not_interested);
+  // Повторное «Назначить» — ничего не меняет, как на сервере.
+  if (view.assignees.some((a) => a.employeeId === employeeId)) return;
+  // Отпуск — пометка, а не запрет (решение 2026-07-30); смена, включая ночь накануне, — запрет.
+  const clash = ALL_ENTRIES.find((s) => s.employeeId === employeeId && !isAbsence(s.category) && entriesClash(s, view.slot));
+  if (clash) throw new Error(weekendBusyRefusal(personName(employeeId), entryLineOf(clash)));
+
+  const work = entry({
+    date: view.slot.date,
+    start: view.slot.start,
+    end: view.slot.end,
+    endDate: null,
+    category: "weekend_work",
+    title: view.slot.title ?? "Работа в выходной",
+    location: view.slot.location,
+    employeeId,
+  });
+  ALL_ENTRIES.push(work);
+  const assignmentId = nextAssignmentId++;
+  WEEKEND_ENTRY_OF.set(assignmentId, work.id);
   // The slot stays open — it may need more than one person.
-  view.assignees.push({ assignmentId: nextAssignmentId++, employeeId, name: personName(employeeId), status: "offered" });
-  // Mirror the real flow's eventual outcome so the payroll ledger updates too.
+  view.assignees.push({ assignmentId, employeeId, name: personName(employeeId), status: "offered" });
+  // Mirror the real flow's eventual outcome for the demo ledger.
   const hours = slotDurationHours(view.slot.start, view.slot.end);
   PAYROLL.push({ employeeId, employeeName: personName(employeeId), date: view.slot.date, hours });
 }
@@ -1058,6 +1081,11 @@ export async function mockUnassignSlot(assignmentId: number): Promise<void> {
     const i = view.assignees.findIndex((a) => a.assignmentId === assignmentId);
     if (i !== -1) {
       view.assignees.splice(i, 1);
+      // Как сервер: снятие убирает и запись из графика.
+      const entryId = WEEKEND_ENTRY_OF.get(assignmentId);
+      const at = ALL_ENTRIES.findIndex((s) => s.id === entryId);
+      if (at !== -1) ALL_ENTRIES.splice(at, 1);
+      WEEKEND_ENTRY_OF.delete(assignmentId);
       return;
     }
   }
