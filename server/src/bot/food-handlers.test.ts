@@ -138,6 +138,24 @@ describe("колбэки опроса", () => {
     expect(api.answers.join(" ")).toMatch(/не приходил/);
   });
 
+  it("опрос закрылся, пока бот отвечал на тап голоса, — кнопки голоса в письмо не возвращаются", async () => {
+    const { db, bot, anya, igor, poll } = stage();
+    const api = recordApi(bot);
+    // Закрытие (кнопка запускающего или тик) влезает ровно между записью
+    // голоса и правкой письма — пока ждём ответа Telegram на тап.
+    bot.api.config.use(async (prev, method, payload, signal) => {
+      if (method === "answerCallbackQuery") closePoll(db, getPoll(db, poll.id)!, anya);
+      return prev(method, payload, signal);
+    });
+    await tap(bot, 333, `poll:v:${poll.id}:for`);
+    expect(voteOf(db, poll.id, igor.id)).toBe("for");
+    const edits = api.calls.filter((c) => c.method === "editMessageText");
+    expect(edits).toHaveLength(1);
+    expect(edits[0]!.payload.text).toContain("Твой голос: 👍 За");
+    const callbacks = (edits[0]!.payload.reply_markup?.inline_keyboard ?? []).flat().map((b: { callback_data?: string }) => b.callback_data ?? "");
+    expect(callbacks.filter((d: string) => d.startsWith("poll:v:"))).toEqual([]);
+  });
+
   it("тап в закрытом опросе — «Опрос закрыт»", async () => {
     const { db, bot, anya, igor, poll } = stage();
     closePoll(db, poll, anya);

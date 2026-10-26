@@ -1,5 +1,5 @@
 import { InlineKeyboard, type Bot, type Context } from "grammy";
-import { formatKg, orderTotal, pollChoiceSchema, TELEGRAM_TEXT_SAFE_MAX } from "@planer/shared";
+import { formatKg, isOpenAt, orderTotal, pollChoiceSchema, TELEGRAM_TEXT_SAFE_MAX } from "@planer/shared";
 import type { Config } from "../config";
 import type { Db } from "../db/client";
 import type { Employee } from "../db/schema";
@@ -172,9 +172,20 @@ export function installFoodHandlers(bot: Bot, deps: FoodHandlerDeps): { sendServ
     const result = castVote(db, poll, who.me.id, choice, now);
     if (!result.ok) { await ctx.answerCallbackQuery({ text: result.error }); return; }
     await ctx.answerCallbackQuery({ text: "Голос принят ✓" });
-    const manage = pollView(db, poll, viewerOf(who.me, ctx.from.id), now)?.canManage ?? false;
-    await safeEdit(() => ctx.editMessageText(pollTextFor(db, poll, who.me.id, now.date), {
-      reply_markup: pollKeyboard(poll.id, choice, manage && poll.createdBy === who.me.id),
+    // Перечитать после `await`: пока Telegram отвечал на тап, опрос мог
+    // закрыться (кнопка запускающего, тик), и `finishPollMessages` уже погасил
+    // кнопки. Правка по старому объекту вернула бы их закрытому опросу.
+    // Голос записан до закрытия, поэтому текст «Твой голос» правдив — меняем
+    // только его, а клавиатуру не передаём: без неё Telegram её снимает.
+    const fresh = getPoll(db, poll.id) ?? poll;
+    const nowAfter = teamNow(config.teamTz);
+    if (!isOpenAt(fresh, nowAfter)) {
+      await safeEdit(() => ctx.editMessageText(pollTextFor(db, fresh, who.me.id, nowAfter.date)));
+      return;
+    }
+    const manage = pollView(db, fresh, viewerOf(who.me, ctx.from.id), nowAfter)?.canManage ?? false;
+    await safeEdit(() => ctx.editMessageText(pollTextFor(db, fresh, who.me.id, nowAfter.date), {
+      reply_markup: pollKeyboard(fresh.id, choice, manage && fresh.createdBy === who.me.id),
     }));
   });
 
