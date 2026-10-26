@@ -293,6 +293,19 @@ describe("an admin replaces sick days with work through the range", () => {
     expect(sent.filter((m) => m.to === 403)).toHaveLength(0);
   });
 
+  // Смена ушла другому — передача мертва, и разрез её не оживляет: гаснет, как гасла.
+  it("a split does not carry over a fan-out whose shift was reassigned", async () => {
+    const { db, app, sick, anya, marat, igorToken } = await scene({ pending: true });
+    db.update(shiftsTable).set({ endDate: day(3) }).where(eq(shiftsTable.id, sick.id)).run();
+    const work3 = createShift(db, { date: day(3), start: "09:00", end: "18:00", category: "shift", title: "День", employeeId: anya.id });
+    const handover3 = createHandover(db, { shiftId: work3.id, fromEmployeeId: anya.id, sickEntryId: sick.id, status: "fanned", escalatedAt: new Date() });
+    db.update(shiftsTable).set({ employeeId: marat.id }).where(eq(shiftsTable.id, work3.id)).run();
+
+    expect((await replace(app, igorToken, anya.id, day(2))).status).toBe(201);
+
+    expect(getHandover(db, handover3.id)!.status).toBe("cancelled");
+  });
+
   it("a PENDING one-day sick leave replaced whole: the row is gone, the admins' buttons are closed, the fan-out is off", async () => {
     const { db, app, sent, edits, sick, handover, anya, igorToken } = await scene({ pending: true });
     addApprovalMessage(db, sick.id, 402, 77);

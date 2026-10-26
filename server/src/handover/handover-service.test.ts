@@ -6,7 +6,7 @@ import { eq } from "drizzle-orm";
 import { employees, shifts, auditLog, handovers as handoversTable, type Shift } from "../db/schema";
 import { getShift, deleteShift } from "../repo/shifts";
 import { addDecline, createHandover, getHandover, listDeclines, listHandoversForEntry } from "../repo/handovers";
-import { startHandovers, offerTo, fanOut, declineHandover, takeHandover, cancelHandoversForEntry, detachHandoversFromEntry, escalate } from "./handover-service";
+import { startHandovers, offerTo, fanOut, declineHandover, takeHandover, cancelHandoversForEntry, detachHandoversFromEntry, escalate, moveHandoversToSplitPiecesDb } from "./handover-service";
 import { createHandoverMessenger } from "./handover-messenger";
 import { createEmployee, linkTelegramAccount, setEmployeeRestrictions } from "../repo/employees";
 import { setNoticeMuted } from "../repo/notice-prefs";
@@ -1068,5 +1068,40 @@ describe("escalate: имена отказавшихся — одним запр�
 
     expect(four.letter).toContain("Отказались: Марк, Игорь, Вера, Олег.");
     expect(four.reads).toBe(one.reads);
+  });
+});
+
+describe("разрез больничного: передача переходит на отколотый кусок", () => {
+  // Многодневное дежурство, которое покрывает и первый кусок (он сохраняет id), и
+  // отколотый. Через диапазон так разрезать нельзя — вырезанный день лёг бы на само
+  // дежурство и переписал его, — но функция не должна полагаться на это: перевешенная
+  // на отколотый кусок передача погасла бы при его правке, хотя первый кусок
+  // по-прежнему покрывает дежурство.
+  it("дежурство, которое ещё покрывает первый кусок, остаётся на старой строке", () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    const sick = sickLeave(db, anya, "2026-08-12", "2026-08-13");
+    const piece = sickLeave(db, anya, "2026-08-15", "2026-08-16");
+    const duty = db.insert(shifts).values({
+      date: "2026-08-13", endDate: "2026-08-15", start: "09:00", end: "18:00", category: "duty", title: "Неделя", employeeId: anya,
+    }).returning().get();
+    const handover = createHandover(db, { shiftId: duty.id, fromEmployeeId: anya, sickEntryId: sick.id, status: "fanned" });
+
+    moveHandoversToSplitPiecesDb(db, sick.id, sick, [piece]);
+
+    expect(getHandover(db, handover.id)!.sickEntryId).toBe(sick.id);
+  });
+
+  it("смена только в днях куска переходит на кусок", () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    const sick = sickLeave(db, anya, "2026-08-12", "2026-08-13");
+    const piece = sickLeave(db, anya, "2026-08-15", "2026-08-16");
+    const work = shift(db, anya, "2026-08-15");
+    const handover = createHandover(db, { shiftId: work.id, fromEmployeeId: anya, sickEntryId: sick.id, status: "fanned" });
+
+    moveHandoversToSplitPiecesDb(db, sick.id, sick, [piece]);
+
+    expect(getHandover(db, handover.id)!.sickEntryId).toBe(piece.id);
   });
 });

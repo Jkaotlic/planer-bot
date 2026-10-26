@@ -704,15 +704,20 @@ export function cancelHandoversForEntryDb(
  * по-прежнему (H9). Здесь основание не новое, а тот же больничный, разрезанный админом, так
  * что одобрение ни при чём. Статус и `fannedAt` не трогаем: это та же рассылка, а разосланная
  * заново она спросила бы коллег о той же смене второй раз.
+ *
+ * Не переносим смену, которую ещё покрывает `kept` — первый кусок, сохранивший id: передача на
+ * нём жива и так, а перевешенная на отколотый погасла бы при его правке, хотя смена покрыта.
+ * И не переносим смену, ушедшую другому, — то же условие, что у `adoptByOtherSickLeave`: такая
+ * передача мертва и должна погаснуть, а не ожить на новом куске.
  */
-export function moveHandoversToSplitPiecesDb(db: Db, sickEntryId: number, pieces: readonly Shift[]): void {
+export function moveHandoversToSplitPiecesDb(db: Db, sickEntryId: number, kept: Shift, pieces: readonly Shift[]): void {
+  // Пересечение промежутков — то же правило, что у `handoverVoidReason`.
+  const overlaps = (shift: Shift, span: Shift) => (shift.endDate ?? shift.date) >= span.date && shift.date <= (span.endDate ?? span.date);
   for (const handover of listHandoversForEntry(db, sickEntryId)) {
     if (handover.status !== "offered" && handover.status !== "fanned") continue;
     const shift = shiftOf(db, handover);
-    if (!shift) continue;
-    const shiftEnd = shift.endDate ?? shift.date;
-    // Пересечение промежутков — то же правило, что у `handoverVoidReason`.
-    const piece = pieces.find((p) => shiftEnd >= p.date && shift.date <= (p.endDate ?? p.date));
+    if (!shift || shift.employeeId !== handover.fromEmployeeId || overlaps(shift, kept)) continue;
+    const piece = pieces.find((p) => overlaps(shift, p));
     if (piece) updateHandover(db, handover.id, { sickEntryId: piece.id });
   }
 }

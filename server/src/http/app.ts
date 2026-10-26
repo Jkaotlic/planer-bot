@@ -2017,7 +2017,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       return { entry, asksApproval: wholly ? (false as const) : approved };
     });
     const after = updateShift(db, row.id, { date: first.date, endDate: first.endDate })!;
-    if (row.category === "sick_leave") moveHandoversToSplitPiecesDb(db, row.id, split.map((piece) => piece.entry));
+    if (row.category === "sick_leave") moveHandoversToSplitPiecesDb(db, row.id, after, split.map((piece) => piece.entry));
     const cancelledNow = row.category === "sick_leave"
       ? cancelHandoversForEntryDb(db, row.id, eachDayIso(after.date, after.endDate ?? after.date))
       : [];
