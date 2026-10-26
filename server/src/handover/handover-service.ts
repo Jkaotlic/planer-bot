@@ -1,4 +1,4 @@
-import { shiftsOverlap, canSwap, shiftStartMs } from "@planer/shared";
+import { canSwap, shiftStartMs } from "@planer/shared";
 import type { Db } from "../db/client";
 import { handovers, type Handover, type Shift } from "../db/schema";
 import { transition } from "../repo/transition";
@@ -18,6 +18,7 @@ import {
 } from "../repo/handovers";
 import { getShift, listShiftsOverlapping, updateShift } from "../repo/shifts";
 import { entryLineOf, nameOf } from "../util/message-lines";
+import { busyWith } from "../schedule/busy";
 import { handoverCandidates } from "./candidates";
 import {
   handoverCancelledText,
@@ -382,17 +383,9 @@ export async function takeHandover(
     }
     if (hasStarted(deps, shift)) return { ok: false as const, reason: STARTED_REFUSAL };
 
-    const clash = listShiftsOverlapping(db, shift.date, shift.endDate ?? shift.date).some(
-      (mine) =>
-        mine.employeeId === employeeId &&
-        mine.id !== shift.id &&
-        (mine.start == null || mine.end == null || shift.start == null || shift.end == null
-          ? true
-          : shiftsOverlap(
-              { date: mine.date, start: mine.start, end: mine.end },
-              { date: shift.date, start: shift.start, end: shift.end },
-            )),
-    );
+    // Та же `busyWith`, что и у списка кандидатов: «Беру» и «кому предложить»
+    // не могут расходиться в том, кто занят. Она же видит ночь накануне (H7).
+    const clash = busyWith(db, employeeId, shift, { ignoreEntryId: shift.id }) != null;
     if (clash) return { ok: false as const, reason: "У тебя в это время уже стоит своя смена" };
 
     updateShift(db, shift.id, { employeeId });

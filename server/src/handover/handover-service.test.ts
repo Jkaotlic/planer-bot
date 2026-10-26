@@ -434,6 +434,23 @@ describe("taking a shift", () => {
     expect(getShift(db, work.id)?.employeeId).toBe(anya);
   });
 
+  it("«Беру» отказывает тому, кто в это утро ещё на ночной с вечера накануне (H7)", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    const igor = person(db, "Игорь");
+    // На 13-е, а не на 12-е: часы теста стоят на 12-м 08:00, и смена 12-го с
+    // 07:00 отказала бы раньше — «уже идёт».
+    const sick = sickLeave(db, anya, "2026-08-13", "2026-08-13");
+    const work = shift(db, anya, "2026-08-13", "07:00", "16:00");
+    const [handover] = await startHandovers(deps(db), { sickEntry: sick, employeeId: anya });
+    shift(db, igor, "2026-08-12", "22:00", "08:00");
+
+    const result = await takeHandover(deps(db), handover!.id, igor, TODAY);
+
+    expect(result).toEqual({ ok: false, reason: "У тебя в это время уже стоит своя смена" });
+    expect(getShift(db, work.id)?.employeeId).toBe(anya);
+  });
+
   it("refuses a handover that is no longer open, whatever closed it", async () => {
     for (const closer of ["taken", "cancelled"] as const) {
       const db = makeTestDb();
