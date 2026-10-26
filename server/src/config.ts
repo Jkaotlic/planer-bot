@@ -3,7 +3,7 @@ import { z } from "zod";
 const intList = z
   .string()
   .transform((s) => s.split(",").map((p) => p.trim()).filter(Boolean))
-  .pipe(z.array(z.coerce.number().int()).min(1));
+  .pipe(z.array(z.coerce.number<string>().int()).min(1));
 
 const schema = z.object({
   BOT_TOKEN: z.string().min(1),
