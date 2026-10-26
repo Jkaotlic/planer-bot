@@ -672,6 +672,28 @@ button {
   margin-bottom: 20px;
 }
 
+/* Ряд сводных фильтров над списком. Отдельный блок, а не место в шапке: шапка
+   уже держит заголовок и «Добавить», и на 900px чип выдавил бы кнопку. */
+.employees-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+/* Чип-кнопка: тот же вид, что у меток в карточках, чтобы читался как сводка
+   их же; рамка — только у нажатого, иначе «фильтр включён» видно лишь по
+   укоротившемуся списку. */
+.cannot-hear-chip {
+  border: 1px solid transparent;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.cannot-hear-chip.is-on {
+  border-color: var(--destructive);
+}
+
 .employees-header-later {
   /* Второй раздел экрана: без отступа заголовок прилипал к карточке над ним. */
   margin-top: 32px;
