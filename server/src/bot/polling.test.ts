@@ -1,6 +1,6 @@
 import { GrammyError } from "grammy";
 import { describe, expect, it } from "vitest";
-import { keepPolling } from "./polling";
+import { keepPolling, POLL_TIMEOUT_S } from "./polling";
 
 function grammyError(code: number, description: string): GrammyError {
   return new GrammyError(
@@ -20,11 +20,14 @@ const CONFLICT = () => grammyError(409, "Conflict: terminated by other getUpdate
  */
 function scriptedBot(script: Array<"ok" | "started-then-409" | Error>) {
   let calls = 0;
+  const timeouts: Array<number | undefined> = [];
   return {
     get calls() {
       return calls;
     },
-    async start(opts?: { onStart?: (info: { username: string }) => void }) {
+    timeouts,
+    async start(opts?: { timeout?: number; onStart?: (info: { username: string }) => void }) {
+      timeouts.push(opts?.timeout);
       const step = script[calls++];
       if (step === undefined) throw new Error("script exhausted");
       if (step instanceof Error) throw step;
@@ -91,5 +94,13 @@ describe("keepPolling", () => {
     await h.run;
     expect(h.bot.calls).toBe(2);
     expect(h.exits).toEqual([]);
+  });
+
+  it("каждый круг опроса короче 20 с молчания — иначе путь до Telegram рвёт его сбросом", async () => {
+    const h = harness([new Error("Network request for 'getUpdates' failed!"), "ok"]);
+    await h.run;
+    expect(POLL_TIMEOUT_S).toBe(10);
+    // И первый запуск, и повтор после отказа — с тем же коротким сроком.
+    expect(h.bot.timeouts).toEqual([10, 10]);
   });
 });
