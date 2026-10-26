@@ -167,11 +167,8 @@ export function createFoodMock(opts: FoodMockOptions) {
     await wait();
     if (!input.question.trim()) throw new Error("Проверь вопрос, время и адресатов.");
     const now = clock();
-    const closesAt = closesAtFromTime(input.closesTime, now.date);
-    // Тот же отказ и тот же текст, что у ручки `POST /api/polls` на сервере —
-    // иначе DEV показал бы опрос, у которого приём голосов кончился в момент
-    // рождения, и кнопки на карточке были бы погашены с первого рендера.
-    if (!isFutureClose(closesAt, now)) throw new Error("Время уже прошло — поставь позже или оставь пустым.");
+    // Как у `POST /api/polls`: прошедшее сегодня время — завтрашнее, отказа нет.
+    const closesAt = closesAtFromTime(input.closesTime, now);
 
     const ids = audienceIds(input.audience);
     const recipients = [...new Set([me().id, ...ids.filter((id) => id !== me().id)])];
@@ -470,7 +467,8 @@ export function createFoodMock(opts: FoodMockOptions) {
     if (input.closesAt != null && !(/^\d{4}-\d{2}-\d{2}T([01]\d|2[0-3]):[0-5]\d$/.test(input.closesAt) && dateStr.safeParse(input.closesAt.slice(0, 10)).success)) {
       throw new Error("Проверь место, срок и адресатов.");
     }
-    const closesAt = input.closesAt ?? closesAtFromTime(input.closesTime ?? null, now.date);
+    // Время без даты у заказа — сегодня, как у `POST /api/orders` (не «ближайшее», как у опроса).
+    const closesAt = input.closesAt ?? (input.closesTime ? `${now.date}T${input.closesTime}` : null);
     // Тот же отказ и тот же текст, что у `POST /api/orders` на сервере.
     if (!isFutureClose(closesAt, now)) throw new Error("Время уже прошло — поставь позже или оставь пустым.");
     if (!isWithinCloseHorizon(closesAt, now.date)) throw new Error(`Срок — не дальше ${FOOD_CLOSE_HORIZON_DAYS} дней.`);

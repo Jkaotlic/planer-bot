@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { Bot } from "grammy";
 import { z } from "zod";
 import {
-  FOOD_CLOSE_HORIZON_DAYS, FOOD_NOTE_MAX, FOOD_QTY_MAX, FOOD_TEXT_MAX, closesAtFromTime, qtyLimitText, dateStr, isFutureClose, isWithinCloseHorizon, orderItemInputSchema, orderTotal, teamAudienceSchema, timeStr,
+  FOOD_CLOSE_HORIZON_DAYS, FOOD_NOTE_MAX, FOOD_QTY_MAX, FOOD_TEXT_MAX, qtyLimitText, dateStr, isFutureClose, isWithinCloseHorizon, orderItemInputSchema, orderTotal, teamAudienceSchema, timeStr,
 } from "@planer/shared";
 import type { Config } from "../../config";
 import type { Db } from "../../db/client";
@@ -86,11 +86,14 @@ export function createOrderRoutes(deps: { db: Db; config: Config; bot?: Bot }): 
       return c.json({ error: "Без меню нужны свои позиции — иначе заказать будет нечего." }, 400);
     }
     const now = teamNow(config.teamTz);
-    const closesAt = parsed.data.closesAt ?? closesAtFromTime(parsed.data.closesTime ?? null, now.date);
+    // Время без даты у заказа — по-прежнему сегодня, а не «ближайшее», как у опроса
+    // (`closesAtFromTime`): у формы заказа есть поле даты, и завтрашний срок ставят
+    // им, а прошедшее сегодняшнее время ловит отказ ниже.
+    const closesTime = parsed.data.closesTime ?? null;
+    const closesAt = parsed.data.closesAt ?? (closesTime ? `${now.date}T${closesTime}` : null);
     // Срок в прошлом рождает заказ уже закрытым: письма уйдут с погашенными
     // кнопками, а тап откажет «Приём закрыт» — человек так и не поймёт, что
-    // заказ вообще был его. Проверка — до отправки, той же строкой, что у
-    // опросов (`isFutureClose`).
+    // заказ вообще был его. Проверка — до отправки (`isFutureClose`).
     if (!isFutureClose(closesAt, now)) return c.json({ error: "Время уже прошло — поставь позже или оставь пустым." }, 400);
     // Дальше горизонта — почти наверняка опечатка в дате (2027 вместо 2026), а заказ
     // с таким сроком висел бы в «Сейчас идёт» и ждал.

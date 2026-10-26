@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { Bot } from "grammy";
 import { z } from "zod";
-import { POLL_QUESTION_MAX, closesAtFromTime, isFutureClose, pollChoiceSchema, teamAudienceSchema, timeStr } from "@planer/shared";
+import { POLL_QUESTION_MAX, closesAtFromTime, pollChoiceSchema, teamAudienceSchema, timeStr } from "@planer/shared";
 import type { Config } from "../../config";
 import type { Db } from "../../db/client";
 import { recordAudit } from "../../repo/audit";
@@ -54,11 +54,10 @@ export function createPollRoutes(deps: { db: Db; config: Config; bot?: Bot }): H
     const parsed = createSchema.safeParse(await jsonBody(c));
     if (!parsed.success) return c.json({ error: "Проверь вопрос, время и адресатов.", issues: parsed.error.issues }, 400);
     const now = teamNow(config.teamTz);
-    const closesAt = closesAtFromTime(parsed.data.closesTime, now.date);
-    // Срок в прошлом рождает опрос уже закрытым: письма уйдут с погашенными
-    // кнопками, а тап на них откажет «Опрос закрыт» — человек так и не поймёт,
-    // что вопрос вообще был его.
-    if (!isFutureClose(closesAt, now)) return c.json({ error: "Время уже прошло — поставь позже или оставь пустым." }, 400);
+    // Время, которое сегодня уже прошло, — завтрашнее (`closesAtFromTime`): срок
+    // всегда впереди, и опрос не может родиться закрытым. Поэтому отказа «время
+    // уже прошло», как у заказов, здесь больше нет.
+    const closesAt = closesAtFromTime(parsed.data.closesTime, now);
     if (!bot) return c.json({ error: "Бот не запущен — рассылка недоступна" }, 503);
     const viewer = viewerOf(c);
     const { reachable, unreachable } = resolveAudience(db, parsed.data.audience, viewer.id, now.date);

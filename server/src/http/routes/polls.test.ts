@@ -141,13 +141,17 @@ describe("опросы по HTTP", () => {
     expect(candidates.map((c: { displayName: string }) => c.displayName)).toEqual(["Игорь", "Марк"]);
   });
 
-  it("срок в прошлом — 400, ничего не уходит", async () => {
-    // Системное время подделано на 09:00 UTC = 12:00 команды (MSK): 08:00 уже прошло.
-    const { app, sent, igor, anyaT } = await stage();
+  it("08:00 в полдень — срок завтра в 08:00: опрос создан открытым, письма уходят", async () => {
+    // Системное время подделано на 09:00 UTC = 12:00 команды (MSK): сегодняшние 08:00 уже прошли.
+    const { db, app, sent, igor, anyaT } = await stage();
     const res = await app.request(new Request("http://x/api/polls",
       send(anyaT, { question: "Пицца?", closesTime: "08:00", audience: { kind: "picked", employeeIds: [igor] } })));
-    expect(res.status).toBe(400);
-    expect(sent).toHaveLength(0);
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.poll.closes).toBe("до завтра, 08:00");
+    expect(body.poll.open).toBe(true);
+    expect(db.select().from(polls).all()[0]?.closesAt).toBe("2026-09-30T08:00");
+    expect(sent).toHaveLength(2);
   });
 
   it("битый closesTime — 400", async () => {

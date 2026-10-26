@@ -56,18 +56,27 @@ export function isOpenAt(x: Closable, now: { date: string; time: string }): bool
   return x.closesAt > `${now.date}T${now.time}`;
 }
 
-/** «12:30» сегодня → `2026-09-29T12:30`. Приём на завтра и дальше не просили. */
-export function closesAtFromTime(time: string | null, today: string): string | null {
-  return time ? `${today}T${time}` : null;
+/**
+ * «12:30» → ближайшие 12:30: сегодня, если они ещё впереди, иначе завтра.
+ *
+ * Раньше «08:00», набранное в полдень, отказывалось «время уже прошло», хотя
+ * человек почти всегда имел в виду утро завтрашнего дня, — а в 23:45 «23:30»
+ * не оставляло способа поставить срок вовсе. Та же минута — тоже завтра:
+ * «до 12:00» в 12:00 уже поздно (сравнение строгое, как у `isOpenAt`), и опрос
+ * родился бы закрытым.
+ */
+export function closesAtFromTime(time: string | null, now: { date: string; time: string }): string | null {
+  if (!time) return null;
+  return time > now.time ? `${now.date}T${time}` : `${addDaysIso(now.date, 1)}T${time}`;
 }
 
 /**
- * Срок ещё не прошёл — проверка при создании, а не только при голосовании.
+ * Срок ещё не прошёл — проверка при создании заказа, а не только при тапе.
  *
- * Без неё «08:00» в форме в полдень создаёт опрос, закрытый в момент рождения:
- * кнопки уйдут, тап откажет, а следующий тик разошлёт пустой итог, будто
- * никто не откликнулся, хотя откликаться было не на что. Сравнение то же
- * строгое, что у `isOpenAt` (Задача 12 переиспользует для заказов еды).
+ * Без неё срок в прошлом создаёт заказ, закрытый в момент рождения: кнопки
+ * уйдут, тап откажет, а следующий тик разошлёт пустой итог. Опросу она больше
+ * не нужна: его время без даты всегда впереди (`closesAtFromTime`). Сравнение
+ * то же строгое, что у `isOpenAt`.
  */
 export function isFutureClose(closesAt: string | null, now: { date: string; time: string }): boolean {
   if (closesAt == null) return true;
@@ -80,11 +89,17 @@ export function isWithinCloseHorizon(closesAt: string | null, today: string): bo
   return closesAt.slice(0, 10) <= addDaysIso(today, FOOD_CLOSE_HORIZON_DAYS);
 }
 
-/** «до 12:30» сегодня, «до 30 сентября, 09:00» — если срок не сегодня. */
+/**
+ * «до 12:30» сегодня, «до завтра, 09:00» — завтра, «до 30 сентября, 09:00» — дальше.
+ *
+ * «Завтра» отдельно, потому что «08:00» в полдень теперь значит завтрашнее утро
+ * (`closesAtFromTime`): по одной дате человек не сразу поймёт, что это не сегодня.
+ */
 export function closesLabel(closesAt: string | null, today: string): string | null {
   if (!closesAt) return null;
   const [date, time] = closesAt.split("T");
   if (date === today) return `до ${time}`;
+  if (date === addDaysIso(today, 1)) return `до завтра, ${time}`;
   return `до ${formatDayMonth(date ?? "")}, ${time}`;
 }
 
@@ -189,6 +204,9 @@ export function pollResultText(question: string, tally: PollTally): string {
 }
 
 const POLL_FULL_LIST_HINT = "Все имена — в мини-аппе: «📋 Заказы и опросы».";
+
+/** Подсказка под полем срока: «08:00» в полдень молча становится завтрашним (`closesAtFromTime`). */
+export const POLL_CLOSES_HINT = "Если время уже прошло — завтра.";
 
 /** Подсказка в форме опроса — из тех же подписей, что и кнопки голоса. */
 export const POLL_CHOICES_HINT = `Ответы: ${POLL_CHOICES.map((c) => POLL_CHOICE_LABEL[c]).join(" · ")}`;

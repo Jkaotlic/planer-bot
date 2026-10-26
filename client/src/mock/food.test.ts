@@ -84,12 +84,20 @@ describe("createFoodMock: копия наблюдателям — как resolve
 });
 
 describe("createFoodMock: «сейчас» — снаружи", () => {
-  it("срок позже «сейчас» принимается, раньше — тем же отказом, что у сервера", async () => {
+  it("опрос: срок позже «сейчас» — сегодня, раньше — завтра, как у сервера", async () => {
     const { mock } = mockAs({ id: 1, isAdmin: true }, { date: "2026-10-06", time: "23:30" });
     const { poll } = await mock.createPoll({ question: "Обед?", closesTime: "23:45", audience: { kind: "team" } });
     expect(poll.closes).toBe("до 23:45");
     expect(poll.open).toBe(true);
-    await expect(mock.createPoll({ question: "Обед?", closesTime: "23:00", audience: { kind: "team" } })).rejects.toThrow(
+    const { poll: tomorrow } = await mock.createPoll({ question: "Ужин?", closesTime: "23:00", audience: { kind: "team" } });
+    expect(tomorrow.closesAt).toBe("2026-10-07T23:00");
+    expect(tomorrow.closes).toBe("до завтра, 23:00");
+    expect(tomorrow.open).toBe(true);
+  });
+
+  it("заказ: время без даты — по-прежнему сегодня, прошедшее — тем же отказом, что у сервера", async () => {
+    const { mock } = mockAs({ id: 1, isAdmin: true }, { date: "2026-10-06", time: "23:30" });
+    await expect(mock.createOrder({ placeId: null, note: null, payHint: null, closesTime: "23:00", audience: { kind: "team" } })).rejects.toThrow(
       "Время уже прошло — поставь позже или оставь пустым.",
     );
   });

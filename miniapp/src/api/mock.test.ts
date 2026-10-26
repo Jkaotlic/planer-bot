@@ -579,12 +579,12 @@ describe("опросы: dev-мок", () => {
     expect(delivered).toBe(4);
   });
 
-  it("прошедший срок отклоняется тем же текстом, что и сервер (isFutureClose)", async () => {
+  it("время, которое сегодня уже прошло, — завтрашнее, как у сервера (closesAtFromTime)", async () => {
     const past = new Date(Date.now() - 5 * 60_000);
     const pastTime = past.toTimeString().slice(0, 5);
-    await expect(
-      mockCreatePoll({ question: "Обед?", closesTime: pastTime, audience: { kind: "team" } }),
-    ).rejects.toThrow("Время уже прошло — поставь позже или оставь пустым.");
+    const { poll } = await mockCreatePoll({ question: "Обед?", closesTime: pastTime, audience: { kind: "team" } });
+    expect(poll.open).toBe(true);
+    expect(poll.closes).toBe(`до завтра, ${pastTime}`);
   });
 });
 

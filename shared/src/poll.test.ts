@@ -34,13 +34,41 @@ describe("isFutureClose", () => {
   });
 });
 
-describe("closesAtFromTime / closesLabel", () => {
-  it("время дня превращается в командный момент и обратно в подпись", () => {
-    expect(closesAtFromTime("12:30", "2026-09-29")).toBe("2026-09-29T12:30");
-    expect(closesAtFromTime(null, "2026-09-29")).toBeNull();
+describe("closesAtFromTime", () => {
+  const noon = { date: "2026-10-26", time: "12:00" };
+
+  it("время позже текущего — сегодня", () => {
+    expect(closesAtFromTime("13:00", noon)).toBe("2026-10-26T13:00");
+  });
+
+  it("время раньше текущего — завтра, а не опрос, закрытый в момент рождения", () => {
+    expect(closesAtFromTime("08:00", noon)).toBe("2026-10-27T08:00");
+  });
+
+  it("та же минута — завтра: «до 12:00» в 12:00 уже поздно, как у isOpenAt", () => {
+    expect(closesAtFromTime("12:00", noon)).toBe("2026-10-27T12:00");
+  });
+
+  it("23:30 в 23:45 — завтра, через границу месяца; 08:00 в 00:10 — сегодня", () => {
+    expect(closesAtFromTime("23:30", { date: "2026-10-31", time: "23:45" })).toBe("2026-11-01T23:30");
+    expect(closesAtFromTime("08:00", { date: "2026-10-27", time: "00:10" })).toBe("2026-10-27T08:00");
+  });
+
+  it("без времени — без срока", () => {
+    expect(closesAtFromTime(null, noon)).toBeNull();
+  });
+});
+
+describe("closesLabel", () => {
+  it("сегодня — только время, завтра — «завтра», дальше — дата", () => {
     expect(closesLabel("2026-09-29T12:30", "2026-09-29")).toBe("до 12:30");
-    expect(closesLabel("2026-09-30T09:00", "2026-09-29")).toBe("до 30 сентября, 09:00");
+    expect(closesLabel("2026-09-30T09:00", "2026-09-29")).toBe("до завтра, 09:00");
+    expect(closesLabel("2026-10-01T09:00", "2026-09-29")).toBe("до 1 октября, 09:00");
     expect(closesLabel(null, "2026-09-29")).toBeNull();
+  });
+
+  it("«завтра» считается через границу месяца", () => {
+    expect(closesLabel("2026-11-01T23:30", "2026-10-31")).toBe("до завтра, 23:30");
   });
 });
 
