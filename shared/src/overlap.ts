@@ -51,11 +51,3 @@ export function entriesClash(a: BusySpan, b: BusySpan): boolean {
   const y = busySpanOf(b);
   return x.start < y.end && y.start < x.end;
 }
-
-/**
- * Отказ назначить на выходной занятого человека. Одна строка для маршрута и
- * dev-моков: консоль и мини-апп показывают её как есть.
- */
-export function weekendBusyRefusal(name: string, entryLine: string): string {
-  return `У ${name} в это время уже стоит: ${entryLine}`;
-}

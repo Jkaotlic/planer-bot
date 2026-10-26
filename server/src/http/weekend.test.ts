@@ -3,7 +3,7 @@ import { recordApi, stubBotInfo } from "../bot/testbot";
 import { Bot } from "grammy";
 import { createApp } from "./app";
 import { makeTestDb } from "../db/testdb";
-import { createEmployee, linkTelegramAccount, getByTelegramId, setEmployeeRestrictions } from "../repo/employees";
+import { archiveEmployee, createEmployee, linkTelegramAccount, getByTelegramId, setEmployeeRestrictions } from "../repo/employees";
 import { createShift, listShiftsInRange } from "../repo/shifts";
 import { dayLabel } from "../util/message-lines";
 import { listRecentAudit } from "../repo/audit";
@@ -11,7 +11,7 @@ import { setManualDay } from "../repo/calendar-days";
 import { signInitData } from "../auth/telegram";
 import { testConfig } from "../test-config";
 import type { Db } from "../db/client";
-import { addInterest } from "../repo/weekend";
+import { addInterest, createVacantSlot, setSlotStatus } from "../repo/weekend";
 import { ENTRY_LOCATION_MAX, ENTRY_NOTE_MAX, ENTRY_TITLE_MAX } from "@planer/shared";
 
 const config = testConfig();
@@ -288,7 +288,7 @@ describe("weekend-market endpoints", () => {
 });
 
 describe("the admin cannot put an archived worker on a weekend slot", () => {
-  it("refuses the assign (400, not_active) and stops showing them as a candidate", async () => {
+  it("refuses the assign (400, «в архиве») and stops showing them as a candidate", async () => {
     const db = makeTestDb();
     const app = createApp({ db, config });
     const admin = await tokenFor(app, 111);
@@ -309,7 +309,7 @@ describe("the admin cannot put an archived worker on a weekend slot", () => {
     // And a direct call — the admin console keeps a stale list, or somebody scripts it.
     const assigned = await app.request(`/api/admin/weekend/slots/${slotId}/assign`, authed(admin, { employeeId: anya.w.id }));
     expect(assigned.status).toBe(400);
-    expect((await assigned.json()).error).toBe("not_active");
+    expect((await assigned.json()).error).toBe("Этот человек в архиве");
     expect(listShiftsInRange(db, date, date)).toHaveLength(0);
   });
 });
@@ -413,7 +413,70 @@ describe("назначить занятого человека нельзя", ()
 
     const assigned = await app.request(`/api/admin/weekend/slots/${slotId}/assign`, authed(admin, { employeeId: igor.w.id }));
     expect(assigned.status).toBe(400);
-    expect((await assigned.json()).error).toBe(`У Игорь Петров в это время уже стоит: ${dayLabel(date)} · 09:00–12:00 · Утро`);
+    expect((await assigned.json()).error).toBe(`Игорь Петров в это время уже занят(а): ${dayLabel(date)} · 09:00–12:00 · Утро`);
+  });
+});
+
+// Обе консоли показывают `error` назначения как есть — сырой код «not_open» на
+// экране админа ничего ему не говорит. Каждый код — своя честная фраза.
+describe("каждый отказ назначения — русская фраза, а не код", () => {
+  async function scene() {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const igor = await worker(db, app, "Игорь Петров", 201);
+    const date = nextSaturday();
+    const posted = await app.request("/api/admin/weekend/slots", authed(admin, { date, start: "10:00", end: "18:00", title: "Ярмарка" }));
+    const slotId = (await posted.json()).slot.id as number;
+    expect((await app.request(`/api/weekend/slots/${slotId}/interest`, authed(igor.token))).status).toBe(201);
+    const assign = async (id: number, employeeId: number) => {
+      const res = await app.request(`/api/admin/weekend/slots/${id}/assign`, authed(admin, { employeeId }));
+      expect(res.status).toBe(400);
+      return (await res.json()).error as string;
+    };
+    return { db, igor: igor.w, date, slotId, assign };
+  }
+
+  it("not_found", async () => {
+    const { igor, assign } = await scene();
+    expect(await assign(999_999, igor.id)).toBe("Этого слота больше нет — обнови список");
+  });
+
+  it("not_open", async () => {
+    const { db, igor, slotId, assign } = await scene();
+    setSlotStatus(db, slotId, "closed");
+    expect(await assign(slotId, igor.id)).toBe("Набор на этот слот уже закрыт");
+  });
+
+  it("slot_passed", async () => {
+    const { db, igor, assign } = await scene();
+    const past = createVacantSlot(db, { date: "2020-01-04", start: "10:00", end: "18:00" });
+    addInterest(db, past.id, igor.id);
+    expect(await assign(past.id, igor.id)).toBe("Этот день уже прошёл");
+  });
+
+  it("not_weekend", async () => {
+    const { db, igor, date, slotId, assign } = await scene();
+    setManualDay(db, date, "workday", null, new Date());
+    expect(await assign(slotId, igor.id)).toBe("По календарю этот день теперь рабочий — работу в выходной на него не поставить");
+  });
+
+  it("not_active", async () => {
+    const { db, igor, date, slotId, assign } = await scene();
+    archiveEmployee(db, igor.id, date);
+    expect(await assign(slotId, igor.id)).toBe("Этот человек в архиве");
+  });
+
+  it("excluded", async () => {
+    const { db, igor, slotId, assign } = await scene();
+    setEmployeeRestrictions(db, igor.id, { excludedFromAssignment: true });
+    expect(await assign(slotId, igor.id)).toBe("Этот человек выведен из назначений");
+  });
+
+  it("not_interested", async () => {
+    const { db, slotId, assign } = await scene();
+    const mark = createEmployee(db, { displayName: "Марк" });
+    expect(await assign(slotId, mark.id)).toBe("Этого человека нет среди желающих на этот слот");
   });
 });
 

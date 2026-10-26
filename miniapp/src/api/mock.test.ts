@@ -824,7 +824,7 @@ describe("назначение на выходной в dev-моке — как 
       date: friday.toISOString().slice(0, 10), start: "22:00", end: "11:00", category: "shift", employeeId: 4,
     });
     try {
-      await expect(mockAssignSlot(301, 4)).rejects.toThrow(/^У .+ в это время уже стоит: .*22:00–11:00/);
+      await expect(mockAssignSlot(301, 4)).rejects.toThrow(/^.+ в это время уже занят\(а\): .*22:00–11:00/);
       const after = (await mockGetAdminWeekendSlots()).find((s) => s.slot.id === 301)!;
       expect(after.assignees.map((a) => a.employeeId)).not.toContain(4);
     } finally {

@@ -153,6 +153,7 @@ import {
   tooLongText,
   type SickApprovalRow,
   weekendBusyRefusal,
+  ASSIGN_REFUSAL_TEXT,
 } from "@planer/shared";
 import {
   postSlot,
@@ -2699,18 +2700,14 @@ export function createApp(deps: AppDeps): Hono<Env> {
     if (typeof body.employeeId !== "number") return c.json({ error: "employeeId is required" }, 400);
     const res = assignSlot(db, Number(c.req.param("id")), body.employeeId, teamNow(config.teamTz).date);
     if (!res.ok) {
-      // "excluded" and "busy" are the reasons here an admin can act on directly —
-      // the worker isn't broken: someone took them out of assignments, or they
-      // already stand somewhere else at those hours — so they get a human phrase.
-      // «busy» names the entry: both consoles show this string as is, and a bare
-      // «занят» would send the admin hunting through the whole schedule.
-      // The other reason codes pass through as-is, unchanged.
+      // Обе консоли показывают `error` как есть, поэтому каждый код — фраза
+      // (`ASSIGN_REFUSAL_TEXT`, полная по типу: новый код без фразы не соберётся).
+      // «busy» называет мешающую запись: голое «занят» отправило бы админа искать
+      // причину по всему графику.
       const error =
-        res.reason === "excluded"
-          ? "Этот человек выведен из назначений"
-          : res.reason === "busy"
-            ? weekendBusyRefusal(nameOf(body.employeeId) ?? "работника", shiftLineOf(db, res.clash.id))
-            : res.reason;
+        res.reason === "busy"
+          ? weekendBusyRefusal(nameOf(body.employeeId) ?? "Работник", shiftLineOf(db, res.clash.id))
+          : ASSIGN_REFUSAL_TEXT[res.reason];
       return c.json({ error }, 400);
     }
     const slot = getVacantSlot(db, res.assignment.slotId);

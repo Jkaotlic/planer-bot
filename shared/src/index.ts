@@ -44,3 +44,4 @@ export * from "./sick-approval";
 export * from "./qr/style";
 export * from "./text-limits";
 export * from "./entry-line";
+export * from "./weekend-assign";

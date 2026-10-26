@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { shiftDurationHours, isDayOff, isAbsence, takesPartInAssignment, type EntryCategory } from "@planer/shared";
+import { shiftDurationHours, isDayOff, isAbsence, takesPartInAssignment, type AssignReason, type EntryCategory } from "@planer/shared";
 import type { Db } from "../db/client";
 import { loadCalendar } from "../repo/calendar-days";
 import { weekendAssignments, type Shift, type VacantSlot, type WeekendAssignment } from "../db/schema";
@@ -30,10 +30,8 @@ import { employeesByIds, getEmployeeById } from "../repo/employees";
 import { busyWith } from "../schedule/busy";
 
 export type Outcome = { ok: true } | { ok: false; reason: string };
-/** Every refusal `assignSlot` actually returns — narrowed so a typo on either
- *  side of the route's `res.reason === "excluded" ? … : res.reason` check
- *  would be caught by `tsc` instead of shipping a raw code to the screen. */
-export type AssignReason = "not_found" | "not_open" | "slot_passed" | "not_weekend" | "not_active" | "excluded" | "not_interested" | "busy";
+/** Коды отказа и их фразы — в @planer/shared (`ASSIGN_REFUSAL_TEXT`). */
+export type { AssignReason };
 /** `changed` is false only for the true no-op branch below (already assigned, nothing
  *  written) — callers use it to skip re-notifying the worker on a repeat "Назначить".
  *  `busy` несёт мешающую запись: админу надо назвать, ЧТО стоит, иначе «занят»
