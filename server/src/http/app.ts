@@ -71,6 +71,7 @@ import {
 } from "../bot/notify";
 import {
   slotLineOf,
+  shiftLineOf,
   nameOf as nameOfDb,
   swapAuditPayload as swapAuditPayloadDb,
   entryAuditPayload,
@@ -2697,10 +2698,18 @@ export function createApp(deps: AppDeps): Hono<Env> {
     if (typeof body.employeeId !== "number") return c.json({ error: "employeeId is required" }, 400);
     const res = assignSlot(db, Number(c.req.param("id")), body.employeeId, teamNow(config.teamTz).date);
     if (!res.ok) {
-      // "excluded" is the one reason here an admin can act on directly — the worker
-      // isn't broken, someone deliberately took them out of assignments — so it gets
-      // a human phrase. The other reason codes pass through as-is, unchanged.
-      const error = res.reason === "excluded" ? "Этот человек выведен из назначений" : res.reason;
+      // "excluded" and "busy" are the reasons here an admin can act on directly —
+      // the worker isn't broken: someone took them out of assignments, or they
+      // already stand somewhere else at those hours — so they get a human phrase.
+      // «busy» names the entry: both consoles show this string as is, and a bare
+      // «занят» would send the admin hunting through the whole schedule.
+      // The other reason codes pass through as-is, unchanged.
+      const error =
+        res.reason === "excluded"
+          ? "Этот человек выведен из назначений"
+          : res.reason === "busy"
+            ? `У ${nameOf(body.employeeId) ?? "работника"} в это время уже стоит: ${shiftLineOf(db, res.clash.id)}`
+            : res.reason;
       return c.json({ error }, 400);
     }
     const slot = getVacantSlot(db, res.assignment.slotId);

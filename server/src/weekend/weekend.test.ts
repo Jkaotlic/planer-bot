@@ -339,6 +339,55 @@ describe("assignSlot and excludedFromAssignment", () => {
   });
 });
 
+// Назначение пишет человеку запись в график, и без проверки занятости админ
+// ставил выходную работу поверх его же смены или отпуска — график показывал
+// два места сразу, а ведомость платила за оба.
+describe("assignSlot занятому человеку", () => {
+  it("отказывает с причиной busy и называет мешающую запись; в график ничего не пишет", () => {
+    const db = makeTestDb();
+    const igor = createEmployee(db, { displayName: "Игорь" });
+    const slot = createVacantSlot(db, { date: "2026-07-18", start: "10:00", end: "18:00" });
+    expect(expressInterest(db, slot.id, igor.id, TEST_TODAY).ok).toBe(true);
+    const own = createShift(db, { date: "2026-07-18", start: "09:00", end: "12:00", category: "shift", employeeId: igor.id });
+
+    expect(assignSlot(db, slot.id, igor.id, TEST_TODAY)).toEqual({ ok: false, reason: "busy", clash: own });
+    expect(listShiftsByEmployee(db, igor.id)).toEqual([own]);
+  });
+
+  it("ночь с пятницы на субботу мешает утреннему слоту", () => {
+    const db = makeTestDb();
+    const igor = createEmployee(db, { displayName: "Игорь" });
+    const slot = createVacantSlot(db, { date: "2026-07-18", start: "07:00", end: "15:00" });
+    expect(expressInterest(db, slot.id, igor.id, TEST_TODAY).ok).toBe(true);
+    const night = createShift(db, { date: "2026-07-17", start: "22:00", end: "08:00", category: "shift", employeeId: igor.id });
+
+    expect(assignSlot(db, slot.id, igor.id, TEST_TODAY)).toMatchObject({ ok: false, reason: "busy", clash: { id: night.id } });
+  });
+
+  // Отпуск здесь — пометка, а не запрет (решение 2026-07-30, тест «names the
+  // absence…» ниже). Но смена, стоящая под отпуском, по-прежнему мешает.
+  it("смена под отпуском мешает, хотя сам отпуск — нет", () => {
+    const db = makeTestDb();
+    const mark = createEmployee(db, { displayName: "Марк" });
+    const slot = createVacantSlot(db, { date: "2026-07-18", start: "10:00", end: "18:00" });
+    expect(expressInterest(db, slot.id, mark.id, TEST_TODAY).ok).toBe(true);
+    createShift(db, { date: "2026-07-13", endDate: "2026-07-19", category: "vacation", employeeId: mark.id });
+    const own = createShift(db, { date: "2026-07-18", start: "12:00", end: "14:00", category: "shift", employeeId: mark.id });
+
+    expect(assignSlot(db, slot.id, mark.id, TEST_TODAY)).toMatchObject({ ok: false, reason: "busy", clash: { id: own.id } });
+  });
+
+  it("ночь, кончившаяся ровно к началу слота, не мешает", () => {
+    const db = makeTestDb();
+    const igor = createEmployee(db, { displayName: "Игорь" });
+    const slot = createVacantSlot(db, { date: "2026-07-18", start: "08:00", end: "16:00" });
+    expect(expressInterest(db, slot.id, igor.id, TEST_TODAY).ok).toBe(true);
+    createShift(db, { date: "2026-07-17", start: "22:00", end: "08:00", category: "shift", employeeId: igor.id });
+
+    expect(assignSlot(db, slot.id, igor.id, TEST_TODAY).ok).toBe(true);
+  });
+});
+
 // Same reason the archived filter in interestedForSlot exists: a name shown
 // unmarked invites the admin to pick it. Somebody can have tapped «🙋 Хочу»
 // BEFORE an admin excluded them, and that stale row would otherwise sit in the

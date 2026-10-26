@@ -1,4 +1,4 @@
-import { dayNumber, nextDate, prevDate, shiftInterval, shiftsOverlap } from "@planer/shared";
+import { dayNumber, isAbsence, nextDate, prevDate, shiftInterval, shiftsOverlap } from "@planer/shared";
 import type { Db } from "../db/client";
 import type { Shift } from "../db/schema";
 import { listEmployeeShiftsOverlapping } from "../repo/shifts";
@@ -47,8 +47,23 @@ function clashes(mine: Shift, at: BusyProbe): boolean {
  *
  * `ignoreEntryId` — сама запись, о которой идёт речь: человек не занят своей же
  * сменой, которую отдаёт или меняет.
+ *
+ * `ignoreAbsences` — для выходных: там отпуск по решению владельца от 2026-07-30
+ * пометка в списке желающих, а не запрет («иногда человек сам просит выйти из
+ * отпуска»). Флаг, а не фильтр результата снаружи: первой найденной могла бы
+ * оказаться отпускная запись и заслонить настоящую смену в те же часы.
  */
-export function busyWith(db: Db, employeeId: number, at: BusyProbe, opts: { ignoreEntryId?: number } = {}): Shift | null {
+export function busyWith(
+  db: Db,
+  employeeId: number,
+  at: BusyProbe,
+  opts: { ignoreEntryId?: number; ignoreAbsences?: boolean } = {},
+): Shift | null {
   const around = listEmployeeShiftsOverlapping(db, employeeId, prevDate(at.date), nextDate(at.endDate ?? at.date));
-  return around.find((mine) => mine.id !== opts.ignoreEntryId && clashes(mine, at)) ?? null;
+  return (
+    around.find(
+      (mine) =>
+        mine.id !== opts.ignoreEntryId && !(opts.ignoreAbsences && isAbsence(mine.category)) && clashes(mine, at),
+    ) ?? null
+  );
 }

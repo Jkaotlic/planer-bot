@@ -4,7 +4,8 @@ import { Bot } from "grammy";
 import { createApp } from "./app";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount, getByTelegramId, setEmployeeRestrictions } from "../repo/employees";
-import { listShiftsInRange } from "../repo/shifts";
+import { createShift, listShiftsInRange } from "../repo/shifts";
+import { dayLabel } from "../util/message-lines";
 import { listRecentAudit } from "../repo/audit";
 import { setManualDay } from "../repo/calendar-days";
 import { signInitData } from "../auth/telegram";
@@ -391,6 +392,28 @@ describe("the admin cannot assign an excluded worker", () => {
     const assigned = await app.request(`/api/admin/weekend/slots/${slotId}/assign`, authed(admin, { employeeId: igor.w.id }));
     expect(assigned.status).toBe(400);
     expect((await assigned.json()).error).toBe("Этот человек выведен из назначений");
+  });
+});
+
+describe("назначить занятого человека нельзя", () => {
+  it("400 с русской фразой: кто и какая запись мешает — не голый код busy", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const admin = await tokenFor(app, 111);
+    const igor = await worker(db, app, "Игорь Петров", 201);
+
+    const date = nextSaturday();
+    const posted = await app.request(
+      "/api/admin/weekend/slots",
+      authed(admin, { date, start: "10:00", end: "18:00", title: "Ярмарка" }),
+    );
+    const slotId = (await posted.json()).slot.id as number;
+    expect((await app.request(`/api/weekend/slots/${slotId}/interest`, authed(igor.token))).status).toBe(201);
+    createShift(db, { date, start: "09:00", end: "12:00", category: "shift", title: "Утро", employeeId: igor.w.id });
+
+    const assigned = await app.request(`/api/admin/weekend/slots/${slotId}/assign`, authed(admin, { employeeId: igor.w.id }));
+    expect(assigned.status).toBe(400);
+    expect((await assigned.json()).error).toBe(`У Игорь Петров в это время уже стоит: ${dayLabel(date)} · 09:00–12:00 · Утро`);
   });
 });
 

@@ -75,6 +75,15 @@ describe("busyWith — занят ли человек в этом интерва
     expect(busyWith(db, igor, DAY_SHIFT, { ignoreEntryId: own.id })).toBeNull();
   });
 
+  it("ignoreAbsences пропускает отпуск, но не смену под ним", () => {
+    const db = makeTestDb();
+    const igor = person(db, "Игорь");
+    entry(db, igor, { date: "2026-08-10", endDate: "2026-08-14", start: null, end: null, category: "vacation" });
+    expect(busyWith(db, igor, DAY_SHIFT, { ignoreAbsences: true })).toBeNull();
+    const own = entry(db, igor, { date: "2026-08-12", start: "15:00", end: "20:00" });
+    expect(busyWith(db, igor, DAY_SHIFT, { ignoreAbsences: true })?.id).toBe(own.id);
+  });
+
   it("чужие записи не делают человека занятым", () => {
     const db = makeTestDb();
     const igor = person(db, "Игорь");
