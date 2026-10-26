@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { makeTestDb } from "../db/testdb";
 import { employees, shifts, auditLog, type Shift } from "../db/schema";
 import { getHandover, listHandoversForEntry, updateHandover } from "../repo/handovers";
-import { approveSickLeave, sickApprovalDeps } from "../sick-approval/sick-approval-service";
+import { approveSickLeave, rejectSickLeave, sickApprovalDeps } from "../sick-approval/sick-approval-service";
 import { updateShift, deleteShift, getShift } from "../repo/shifts";
 import { startHandovers, offerTo, handoverVoidReason } from "./handover-service";
 import { runHandoverTick } from "./handover-tick";
@@ -570,6 +570,47 @@ describe("urgent branch: a sick leave still waiting for «ОК»", () => {
     const handed = listHandoversForEntry(db, sick.id).map((h) => h.shiftId);
     expect(handed).toEqual([newDay.id]);
     expect(handed).not.toContain(approvedDay.id);
+  });
+
+  it("продление, отклонённое, пока тик рассылал по первому больничному, — по снятым дням «Возьмёшь смену?» не уходит", async () => {
+    // H6: тик читает список ждущих один раз, а между больничными ждёт Telegram. Пока
+    // уходил веер по Ане, админ отклонил продление Марка — его 12-е больше не больничный.
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    const mark = person(db, "Марк");
+    const igor = person(db, "Игорь");
+    const boss = person(db, "Даша");
+    const first = pendingSick(db, anya, "2026-08-12", "2026-08-12");
+    shift(db, anya, "2026-08-12", "15:00");
+    // 11-е одобрено, 12-е — продление, ждущее «ОК».
+    const second = pendingSick(db, mark, "2026-08-11", "2026-08-12", { date: "2026-08-11", endDate: "2026-08-11" });
+    const marksDay = shift(db, mark, "2026-08-12", "16:00");
+    const base = deps(db);
+    const approvalDeps = { ...sickApprovalDeps(null, db, base.config), now: base.now, messenger: base.messenger };
+    const fanned: number[] = [];
+    let rejected = false;
+    const racing = {
+      ...base,
+      messenger: {
+        ...base.messenger,
+        fan: async (ids: readonly number[], handoverId: number, text: string) => {
+          fanned.push(handoverId);
+          await base.messenger.fan(ids, handoverId, text);
+          if (!rejected) {
+            rejected = true;
+            expect((await rejectSickLeave(approvalDeps, second.id, boss)).ok).toBe(true);
+          }
+        },
+      },
+    };
+
+    await runHandoverTick(racing, NOW);
+
+    expect(listHandoversForEntry(db, first.id)).toHaveLength(1);
+    expect(listHandoversForEntry(db, second.id)).toEqual([]);
+    expect(fanned).toEqual(listHandoversForEntry(db, first.id).map((h) => h.id));
+    expect(getShift(db, marksDay.id)!.employeeId).toBe(mark);
+    expect(sent.filter((m) => m.to === `employee:${igor}`)).toHaveLength(1);
   });
 });
 
