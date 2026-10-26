@@ -121,4 +121,20 @@ describe("«Работники»: чип «Не слышат бота»", () => 
     // Счёт — про команду, а не про найденное: иначе число прыгало бы под пальцами.
     expect(chip(el)?.textContent).toBe("Не слышат бота: 2");
   });
+
+  it("фильтр включён, поиск никого среди них не нашёл — подпись говорит про фильтр, а не про имя", async () => {
+    // «Никого с таким именем нет» здесь соврало бы: Марк с таким именем есть,
+    // он просто слышит бота и под фильтр не попал.
+    const el = await mountWith(TEAM);
+    await click(chip(el)!);
+    await typeSearch(el, "марк");
+    expect(activeNames(el)).toEqual([]);
+    expect(el.querySelector(".employees-empty")?.textContent).toBe("Среди тех, кто не слышит бота, таких нет.");
+  });
+
+  it("без фильтра пустой поиск по-прежнему говорит про имя", async () => {
+    const el = await mountWith(TEAM);
+    await typeSearch(el, "нет такого");
+    expect(el.querySelector(".employees-empty")?.textContent).toBe("Никого с таким именем нет.");
+  });
 });

@@ -179,6 +179,9 @@ export function EmployeesScreen({ employees, onChanged, onRestrictionsSaved, onO
         employees={visibleActive}
         fullOrder={active}
         emptyLabel="Пока нет активных работников"
+        // Под фильтром пустой результат не значит «такого имени нет»: человек
+        // с этим именем может быть — он просто слышит бота и под фильтр не попал.
+        noMatchLabel={cannotHearOn ? "Среди тех, кто не слышит бота, таких нет." : "Никого с таким именем нет."}
         actionLabel="Архивировать"
         confirmQuestionFor={(e) => `${e.displayName} — в архив? Будущие смены станут «Не назначено», отпуска впереди удалятся, обмены и выходные снимутся.`}
         busyId={busyId}
@@ -249,6 +252,8 @@ interface EmployeesSectionProps {
    */
   fullOrder: readonly Employee[];
   emptyLabel: string;
+  /** Подпись, когда ростер не пуст, но поиск (и фильтр, если включён) никого не оставил. */
+  noMatchLabel: string;
   actionLabel: string;
   /** Есть — действие спрашивает подтверждение (архивация необратима по сути). */
   confirmQuestionFor?: (employee: Employee) => string;
@@ -275,7 +280,7 @@ interface EmployeesSectionProps {
   onSetObserver: (id: number, isObserver: boolean) => void;
 }
 
-function EmployeesSection({ title, employees, fullOrder, emptyLabel, actionLabel, confirmQuestionFor, busyId, rowError, onAction, onToggleAdmin, onRename, onPreferredName, onShowInvite, onReorder, onBirthDate, onSetRestrictions, onSetObserver }: EmployeesSectionProps) {
+function EmployeesSection({ title, employees, fullOrder, emptyLabel, noMatchLabel, actionLabel, confirmQuestionFor, busyId, rowError, onAction, onToggleAdmin, onRename, onPreferredName, onShowInvite, onReorder, onBirthDate, onSetRestrictions, onSetObserver }: EmployeesSectionProps) {
   return (
     <section className="employees-section">
       <h3 className="employees-section-title">{title}</h3>
@@ -284,7 +289,7 @@ function EmployeesSection({ title, employees, fullOrder, emptyLabel, actionLabel
         // список бывает по двум разным причинам, и подпись обязана называть
         // ту, что случилась — иначе «Пока нет активных работников» соврёт
         // при полном ростере, если поиск просто ничего не нашёл.
-        <div className="employees-empty">{fullOrder.length === 0 ? emptyLabel : "Никого с таким именем нет."}</div>
+        <div className="employees-empty">{fullOrder.length === 0 ? emptyLabel : noMatchLabel}</div>
       ) : (
         <div className="employees-list">
           {employees.map((employee) => (
