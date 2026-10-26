@@ -152,6 +152,7 @@ import {
   EMPLOYEE_NAME_MAX,
   tooLongText,
   type SickApprovalRow,
+  weekendBusyRefusal,
 } from "@planer/shared";
 import {
   postSlot,
@@ -2708,7 +2709,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
         res.reason === "excluded"
           ? "Этот человек выведен из назначений"
           : res.reason === "busy"
-            ? `У ${nameOf(body.employeeId) ?? "работника"} в это время уже стоит: ${shiftLineOf(db, res.clash.id)}`
+            ? weekendBusyRefusal(nameOf(body.employeeId) ?? "работника", shiftLineOf(db, res.clash.id))
             : res.reason;
       return c.json({ error }, 400);
     }

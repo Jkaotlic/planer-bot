@@ -1,40 +1,11 @@
-import { dayNumber, isAbsence, nextDate, prevDate, shiftInterval, shiftsOverlap } from "@planer/shared";
+import { entriesClash, isAbsence, nextDate, prevDate, type BusySpan } from "@planer/shared";
 import type { Db } from "../db/client";
 import type { Shift } from "../db/schema";
 import { listEmployeeShiftsOverlapping } from "../repo/shifts";
 
 /** Интервал, про который спрашивают «свободен ли человек». Форма — как у записи
  *  графика, чтобы саму запись можно было передать без перекладывания полей. */
-export type BusyProbe = { date: string; endDate?: string | null; start: string | null; end: string | null };
-
-const MINUTES_PER_DAY = 24 * 60;
-
-/**
- * Абсолютный [начало, конец) записи в минутах. Запись без часов — отпуск,
- * больничный, импортированный «?» — занимает свои дни целиком: так её рисует
- * сетка, и так её понимал прежний `standsInTheWay` у передач.
- */
-function spanOf(e: BusyProbe): { start: number; end: number } {
-  if (e.start != null && e.end != null) return shiftInterval({ date: e.date, start: e.start, end: e.end });
-  return {
-    start: dayNumber(e.date) * MINUTES_PER_DAY,
-    end: (dayNumber(e.endDate ?? e.date) + 1) * MINUTES_PER_DAY,
-  };
-}
-
-function clashes(mine: Shift, at: BusyProbe): boolean {
-  // Обе стороны с часами — ровно тот `shiftsOverlap`, которым меряет обмен:
-  // три поверхности (обмен, передача, выходные) не должны расходиться в том,
-  // что значит «занят».
-  if (mine.start != null && mine.end != null && at.start != null && at.end != null) {
-    return shiftsOverlap({ date: mine.date, start: mine.start, end: mine.end }, { date: at.date, start: at.start, end: at.end });
-  }
-  // Хоть одна сторона — целые дни. Полуинтервал тот же, что у `shiftsOverlap`:
-  // смена до 00:00 накануне отпуска его не задевает.
-  const a = spanOf(mine);
-  const b = spanOf(at);
-  return a.start < b.end && b.start < a.end;
-}
+export type BusyProbe = BusySpan;
 
 /**
  * Первая запись человека, которая стоит поперёк `at`, или `null`, если он свободен.
@@ -63,7 +34,7 @@ export function busyWith(
   return (
     around.find(
       (mine) =>
-        mine.id !== opts.ignoreEntryId && !(opts.ignoreAbsences && isAbsence(mine.category)) && clashes(mine, at),
+        mine.id !== opts.ignoreEntryId && !(opts.ignoreAbsences && isAbsence(mine.category)) && entriesClash(mine, at),
     ) ?? null
   );
 }
