@@ -96,7 +96,7 @@ import {
   sickApprovalDeps,
   takeRequestOutOfPending,
 } from "../sick-approval/sick-approval-service";
-import { cancelHandoversForEntryDb, detachHandoversFromEntry, notifyCancelledHandovers, type CancelledHandover } from "../handover/handover-service";
+import { cancelHandoversForEntryDb, detachHandoversFromEntry, moveHandoversToSplitPiecesDb, notifyCancelledHandovers, type CancelledHandover } from "../handover/handover-service";
 import { createCalendarRoutes } from "./routes/calendar";
 import { createPollRoutes } from "./routes/polls";
 import { createFoodPlaceRoutes } from "./routes/food-places";
@@ -1980,9 +1980,10 @@ export function createApp(deps: AppDeps): Hono<Env> {
    * который сказал бы коллегам «снял(а) больничный» про то, чего человек не делал.
    *
    * Кусок после разреза — новая строка с теми же полями. Передачи его дней
-   * переходят на неё сами (`adoptByOtherSickLeave` внутри гашения): человек
-   * болен по-прежнему, и смена всё так же ищет хозяина. Поэтому кусок создаётся
-   * ДО гашения — иначе перевешивать было бы не на что.
+   * переходят на неё явно (`moveHandoversToSplitPiecesDb`), а не переносом внутри
+   * гашения: тот берёт только одобренные дни, и кусок заявки, ждущей «ОК», терял
+   * бы передачу (H9). Человек болен по-прежнему, и смена всё так же ищет хозяина.
+   * Поэтому кусок создаётся ДО гашения — иначе перевешивать было бы не на что.
    */
   const cutAbsenceDb = (row: Shift, days: readonly string[], actorEmployeeId: number): AbsenceCut => {
     const pieces = cutDaysFromSpan(row, days);
@@ -2016,6 +2017,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
       return { entry, asksApproval: wholly ? (false as const) : approved };
     });
     const after = updateShift(db, row.id, { date: first.date, endDate: first.endDate })!;
+    if (row.category === "sick_leave") moveHandoversToSplitPiecesDb(db, row.id, split.map((piece) => piece.entry));
     const cancelledNow = row.category === "sick_leave"
       ? cancelHandoversForEntryDb(db, row.id, eachDayIso(after.date, after.endDate ?? after.date))
       : [];

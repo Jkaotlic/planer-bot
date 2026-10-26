@@ -696,6 +696,28 @@ export function cancelHandoversForEntryDb(
 }
 
 /**
+ * Разрез больничного: живые передачи старой строки, чья смена лежит в днях отколотого куска,
+ * переходят на этот кусок — до гашения по дням первого куска.
+ *
+ * Не через `adoptByOtherSickLeave`: тот берёт только одобренные дни, а кусок заявки, ждущей
+ * «ОК», не одобрен — и передача гасла, коллегам уходил «отбой» про человека, который болен
+ * по-прежнему (H9). Здесь основание не новое, а тот же больничный, разрезанный админом, так
+ * что одобрение ни при чём. Статус и `fannedAt` не трогаем: это та же рассылка, а разосланная
+ * заново она спросила бы коллег о той же смене второй раз.
+ */
+export function moveHandoversToSplitPiecesDb(db: Db, sickEntryId: number, pieces: readonly Shift[]): void {
+  for (const handover of listHandoversForEntry(db, sickEntryId)) {
+    if (handover.status !== "offered" && handover.status !== "fanned") continue;
+    const shift = shiftOf(db, handover);
+    if (!shift) continue;
+    const shiftEnd = shift.endDate ?? shift.date;
+    // Пересечение промежутков — то же правило, что у `handoverVoidReason`.
+    const piece = pieces.find((p) => shiftEnd >= p.date && shift.date <= (p.endDate ?? p.date));
+    if (piece) updateHandover(db, handover.id, { sickEntryId: piece.id });
+  }
+}
+
+/**
  * Все живые передачи человека гаснут — путь архивации. Удалённые больничные (с сегодня)
  * гасит `cancelHandoversForEntryDb`, но идущий больничный архивация не трогает, и его
  * передачи на будущие смены — вместе с перевешенными на него с удалённых — оставались бы
