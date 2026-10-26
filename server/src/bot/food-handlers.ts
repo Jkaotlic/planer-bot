@@ -152,11 +152,22 @@ export function installFoodHandlers(bot: Bot, deps: FoodHandlerDeps): { sendServ
    * После любого тапа письмо перерисовывается целиком: текст «Твой заказ» и
    * кнопки. Правка — косметика (`safeEdit`): ответ всплывашкой уже сказал,
    * что случилось, даже если письмо удалено.
+   *
+   * Заказ читается здесь, после ответа на тап, и проверяется заново: пока
+   * Telegram отвечал, приём мог закрыться (кнопка запускающего, тик), и
+   * `finishOrderMessages` уже погасил кнопки. Правка с клавиатурой вернула бы
+   * их закрытому заказу. Тап записан до закрытия, поэтому «Твой заказ»
+   * правдив — меняем только текст, а без клавиатуры Telegram её снимает.
+   * Тот же приём, что у голоса в опросе.
    */
   async function redrawOrder(ctx: Context, orderId: number, me: Employee): Promise<void> {
     const order = getOrder(db, orderId);
     if (!order) return;
     const now = teamNow(config.teamTz);
+    if (!isOpenAt(order, now)) {
+      await safeEdit(() => ctx.editMessageText(orderTextFor(db, order, me.id, now.date)));
+      return;
+    }
     await safeEdit(() => ctx.editMessageText(orderTextFor(db, order, me.id, now.date), {
       reply_markup: orderKeyboard(order, orderMenu(db, order), config.publicUrl, order.createdBy === me.id),
     }));

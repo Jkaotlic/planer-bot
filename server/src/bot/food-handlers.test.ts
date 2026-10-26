@@ -261,6 +261,27 @@ describe("колбэки заказа", () => {
     expect(api.answers.at(-1)).toBe("− Икра кетовая 0,4 кг (осталось 0,8 кг)");
   });
 
+  // Как у голоса в опросе: закрытие (кнопка запускающего или тик) влезает между
+  // записью тапа и правкой письма — пока ждём ответа Telegram. Правка с живой
+  // клавиатурой вернула бы кнопки заказу, у которого `finishOrderMessages` их уже погасил.
+  it.each([
+    ["＋ блюдо", (id: number, dish: number) => `order:add:${id}:${dish}`, "Твой заказ:"],
+    ["«Не буду»", (id: number) => `order:no:${id}`, "Ты не заказываешь"],
+  ] as const)("заказ закрылся, пока бот отвечал на тап (%s), — кнопки заказа в письмо не возвращаются", async (_label, data, text) => {
+    const { db, bot, anya, order, shawarmaId } = stage();
+    const api = recordApi(bot);
+    bot.api.config.use(async (prev, method, payload, signal) => {
+      if (method === "answerCallbackQuery") closeOrder(db, getOrder(db, order.id)!, anya);
+      return prev(method, payload, signal);
+    });
+    await tap(bot, 333, data(order.id, shawarmaId));
+    expect(getOrder(db, order.id)!.closedAt).not.toBeNull();
+    const edits = api.calls.filter((c) => c.method === "editMessageText");
+    expect(edits).toHaveLength(1);
+    expect(edits[0]!.payload.text).toContain(text);
+    expect((edits[0]!.payload.reply_markup?.inline_keyboard ?? []).flat()).toEqual([]);
+  });
+
   it("«Закрыть приём» — только запускающему; после закрытия тап по блюду отвечает «Приём закрыт»", async () => {
     const { db, bot, order, shawarmaId } = stage();
     const api = recordApi(bot);
