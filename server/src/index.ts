@@ -84,7 +84,7 @@ const tickRound = createTickScheduler([
     // отдельного таймера, чтобы погаснуть, когда её смена уже прошла.
     { name: "swaps", run: () => runSwapExpiryTick(db, bot, teamNow(config.teamTz)) },
     // Выходной без ответа за два дня до слота — админам одно письмо.
-    { name: "weekend-nudge", run: () => runWeekendNudgeTick(db, bot, teamNow(config.teamTz), config.publicUrl) },
+    { name: "weekend-nudge", run: () => runWeekendNudgeTick(db, bot, teamNow(config.teamTz), config.publicUrl, config.teamTz) },
     // Закрытие просроченных опросов (и, с Задачи 13, заказов) — тем же
     // пятиминутным тиком, что и остальные: своего таймера не заводит.
     { name: "food", run: () => runFoodTick(db, bot, teamNow(config.teamTz), config.publicUrl) },
