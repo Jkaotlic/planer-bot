@@ -50,6 +50,60 @@ export const CHECKLIST_DOC_URL_MAX = 500;
 
 /**
  * Потолок одного письма с запасом до лимита Telegram в 4096 знаков. Общий для всех
- * писем, которые склеивают строки по людям или сборам: заказ, итог опроса, «Сервисы».
+ * писем, которые склеивают строки по людям или сборам: заказ, итог опроса, «Сервисы»,
+ * чек-лист дежурного (через `clampTelegramText`).
  */
 export const TELEGRAM_TEXT_SAFE_MAX = 4000;
+
+/**
+ * Укорачивает письмо до `max`, срезая целые строки с конца и ставя вместо них
+ * хвост `tail(N)` — «…и ещё N строк».
+ *
+ * Зачем: письмо длиннее 4096 знаков Telegram отвергает целиком, отказ выглядит
+ * как «насовсем» (400), и рассылка молча гаснет до утра — так терялся чек-лист
+ * дежурного (аудит 2026-10-26, H2). Обрезанное письмо, которое честно говорит,
+ * сколько не вошло, лучше пропавшего.
+ *
+ * Строками, а не знаками: оборванный посреди пункт читается как опечатка, а не
+ * как сокращение. Пустые строки скрытыми не считаются и перед хвостом не
+ * остаются: «ещё 4 строки», из которых две — пустые разделители, обещали бы
+ * текст, которого нет. Если даже первая строка длиннее предела, она режется по
+ * знакам с «…», и считается скрытой — целиком она не показана.
+ *
+ * Результат всегда `≤ max`: это контракт, ради которого функция существует.
+ */
+export function clampTelegramText(
+  text: string,
+  tail: (hiddenLines: number) => string,
+  max = TELEGRAM_TEXT_SAFE_MAX,
+): string {
+  if (text.length <= max) return text;
+  const lines = text.split("\n");
+  const hiddenFrom = (from: number) => lines.slice(from).filter((l) => l.trim() !== "").length;
+  // Перебор с конца: строк — десятки, а арифметика длин ошибалась бы на
+  // разделителях (тот же довод, что у `orderInviteText`).
+  for (let keep = lines.length - 1; keep >= 1; keep -= 1) {
+    const head = lines.slice(0, keep).join("\n").trimEnd();
+    const hidden = hiddenFrom(keep);
+    const out = hidden === 0 ? head : `${head}\n${tail(hidden)}`;
+    if (out.length <= max) return out;
+  }
+  const end = tail(hiddenFrom(1) + 1);
+  let room = max - end.length - 2; // «…» и перевод строки
+  if (room <= 0) return end.slice(0, max);
+  // Половинка суррогатной пары — битый UTF-16, и Telegram отверг бы уже
+  // обрезанное письмо.
+  const first = lines[0] ?? "";
+  if (/[\uD800-\uDBFF]/.test(first.charAt(room - 1))) room -= 1;
+  return `${first.slice(0, room)}…\n${end}`;
+}
+
+/** «1 строка» / «2 строки» / «5 строк» — для хвоста обрезанного письма. */
+export function linesWord(count: number): string {
+  const mod100 = count % 100;
+  const mod10 = count % 10;
+  if (mod100 >= 11 && mod100 <= 14) return `${count} строк`;
+  if (mod10 === 1) return `${count} строка`;
+  if (mod10 >= 2 && mod10 <= 4) return `${count} строки`;
+  return `${count} строк`;
+}
