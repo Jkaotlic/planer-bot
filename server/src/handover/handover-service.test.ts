@@ -508,8 +508,43 @@ describe("taking a shift", () => {
 
     const result = await takeHandover(deps(db), handover!.id, igor, TODAY);
 
-    expect(result).toEqual({ ok: false, reason: "У тебя в это время уже стоит своя смена" });
+    expect(result).toEqual({ ok: false, reason: "У тебя в это время уже стоит: Ср 12 авг · 22:00–08:00 · День" });
     expect(getShift(db, work.id)?.employeeId).toBe(anya);
+  });
+
+  it("«Беру» в отпуске — отказ называет отпуск, а не «свою смену»", async () => {
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    const igor = person(db, "Игорь");
+    const sick = sickLeave(db, anya, "2026-08-13", "2026-08-13");
+    const work = shift(db, anya, "2026-08-13", "09:00", "18:00");
+    const [handover] = await startHandovers(deps(db), { sickEntry: sick, employeeId: anya });
+    db.insert(shifts).values({ date: "2026-08-13", endDate: "2026-08-15", category: "vacation", employeeId: igor }).run();
+
+    const result = await takeHandover(deps(db), handover!.id, igor, TODAY);
+
+    expect(result).toEqual({ ok: false, reason: "У тебя в это время уже стоит: Чт 13 авг – Сб 15 авг · весь день · Отпуск" });
+    expect(getShift(db, work.id)?.employeeId).toBe(anya);
+  });
+
+  it("отказ «Беру» с длинной подписью мешающей записи влезает в ответ кнопки (200 символов)", async () => {
+    // Подпись записи — до 200 символов (ENTRY_TITLE_MAX), а ответ на нажатие
+    // Telegram больше 200 не примет: человек не увидел бы вообще ничего.
+    const db = makeTestDb();
+    const anya = person(db, "Аня");
+    const igor = person(db, "Игорь");
+    const sick = sickLeave(db, anya, "2026-08-13", "2026-08-13");
+    shift(db, anya, "2026-08-13", "09:00", "18:00");
+    const [handover] = await startHandovers(deps(db), { sickEntry: sick, employeeId: anya });
+    db.insert(shifts).values({ date: "2026-08-13", start: "10:00", end: "12:00", category: "offsite", title: "Я".repeat(200), employeeId: igor }).run();
+
+    const result = await takeHandover(deps(db), handover!.id, igor, TODAY);
+
+    expect(result.ok).toBe(false);
+    const reason = result.ok ? "" : result.reason;
+    expect(Array.from(reason).length).toBe(200);
+    expect(reason.startsWith("У тебя в это время уже стоит: Чт 13 авг · 10:00–12:00 · ЯЯЯ")).toBe(true);
+    expect(reason.endsWith("Я…")).toBe(true);
   });
 
   it("refuses a handover that is no longer open, whatever closed it", async () => {

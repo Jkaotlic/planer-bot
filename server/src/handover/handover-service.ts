@@ -18,7 +18,7 @@ import {
   updateHandover,
 } from "../repo/handovers";
 import { getShift, listShiftsOverlapping, updateShift } from "../repo/shifts";
-import { entryLineOf, nameOf } from "../util/message-lines";
+import { entryLineOf, nameOf, shiftLineOf } from "../util/message-lines";
 import { busyWith } from "../schedule/busy";
 import { handoverCandidates } from "./candidates";
 import {
@@ -406,8 +406,10 @@ export async function takeHandover(
 
     // Та же `busyWith`, что и у списка кандидатов: «Беру» и «кому предложить»
     // не могут расходиться в том, кто занят. Она же видит ночь накануне (H7).
-    const clash = busyWith(db, employeeId, shift, { ignoreEntryId: shift.id }) != null;
-    if (clash) return { ok: false as const, reason: "У тебя в это время уже стоит своя смена" };
+    // Отказ называет мешающую запись: мешать может и отпуск, и «своя смена»
+    // про отпуск была бы неправдой — человек искал бы смену, которой нет.
+    const clash = busyWith(db, employeeId, shift, { ignoreEntryId: shift.id });
+    if (clash) return { ok: false as const, reason: clipForCallbackAnswer(`У тебя в это время уже стоит: ${shiftLineOf(db, clash.id)}`) };
 
     updateShift(db, shift.id, { employeeId });
     const updated = updateHandover(db, handoverId, {
@@ -595,6 +597,20 @@ export function settleHandoverVoidReason(db: Db, handover: Handover): VoidReason
 }
 
 const STARTED_REFUSAL = "Эта смена уже началась";
+
+/** Предел Telegram для ответа на нажатие кнопки. */
+const CALLBACK_ANSWER_MAX = 200;
+
+/**
+ * Отказ «Беру» уходит ответом на нажатие, а длиннее 200 символов Telegram его не
+ * примет — и человек не увидит ничего. Строка записи несёт подпись до 200
+ * символов, поэтому режем с «…»: начало (день, часы) важнее хвоста подписи. По
+ * символам, а не по UTF-16: эмодзи в подписи не должен разломиться пополам.
+ */
+function clipForCallbackAnswer(text: string): string {
+  const chars = Array.from(text);
+  return chars.length <= CALLBACK_ANSWER_MAX ? text : `${chars.slice(0, CALLBACK_ANSWER_MAX - 1).join("")}…`;
+}
 
 /** Что сказать нажавшему «Беру» или «предложить», когда передача мертва. */
 export const VOID_REFUSAL: Record<VoidReason, string> = {

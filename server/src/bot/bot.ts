@@ -1788,7 +1788,7 @@ export function createBot(deps: BotDeps): Bot {
         : await declineHandover(deps, handoverId, who.me.id, onDecided);
     if (!res.ok) {
       // The service writes its refusals in Russian a person can read — «Уже
-      // забрали», «У тебя в это время уже стоит своя смена» — so they go straight
+      // забрали», «У тебя в это время уже стоит: <запись>» — so they go straight
       // through. There is no reason code to translate here, unlike swaps.
       await ctx.answerCallbackQuery({ text: res.reason });
       return;
