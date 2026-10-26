@@ -1,5 +1,5 @@
 import { and, desc, eq, gte, inArray, isNull, lte, isNotNull, or, sql } from "drizzle-orm";
-import { closesLabel, isOpenAt, pollTally, type PollChoice, type PollTally } from "@planer/shared";
+import { POLL_OPEN_MAX_DAYS, closesLabel, isOpenAt, pollTally, type PollChoice, type PollTally } from "@planer/shared";
 import type { Db } from "../db/client";
 import { employees, pollRecipients, pollVotes, polls, type Poll } from "../db/schema";
 
@@ -140,9 +140,21 @@ export function cancelPoll(db: Db, poll: Poll, viewer: Viewer): Result {
   return finish(db, poll.id, "cancelledAt") ? { ok: true } : { ok: false, error: "Опрос уже закрыт." };
 }
 
-export function closeDuePolls(db: Db, now: TeamClock): Poll[] {
+/**
+ * Опросы, которым пора закрыться: срок прошёл или опрос без срока старше
+ * `POLL_OPEN_MAX_DAYS`.
+ *
+ * Возраст считается от момента `at` (по умолчанию — сейчас), а не от
+ * командной даты: `createdAt` — момент UTC, и «три дня» здесь — длительность,
+ * а не граница дня, так что часовой пояс команды ни на что не влияет.
+ */
+export function closeDuePolls(db: Db, now: TeamClock, at: Date = new Date()): Poll[] {
+  const tooOld = new Date(at.getTime() - POLL_OPEN_MAX_DAYS * 24 * 60 * 60 * 1000);
   const due = db.select().from(polls)
-    .where(and(isNull(polls.closedAt), isNull(polls.cancelledAt), isNotNull(polls.closesAt), lte(polls.closesAt, `${now.date}T${now.time}`)))
+    .where(and(isNull(polls.closedAt), isNull(polls.cancelledAt), or(
+      and(isNotNull(polls.closesAt), lte(polls.closesAt, `${now.date}T${now.time}`)),
+      and(isNull(polls.closesAt), lte(polls.createdAt, tooOld)),
+    )))
     .all();
   return due.filter((p) => finish(db, p.id, "closedAt"));
 }

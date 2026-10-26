@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { makeTestDb } from "../db/testdb";
-import { createEmployee, linkTelegramAccount, setEmployeeAdmin } from "../repo/employees";
+import { archiveEmployee, createEmployee, linkTelegramAccount, setEmployeeAdmin } from "../repo/employees";
+import { polls } from "../db/schema";
+import { eq } from "drizzle-orm";
+import { POLL_OPEN_MAX_DAYS } from "@planer/shared";
 import type { Db } from "../db/client";
 import {
   cancelPoll, castVote, closeDuePolls, closePoll, createPoll, getPoll, listPollsFor, pollView, voteOf,
@@ -77,6 +80,32 @@ describe("закрытие и отмена", () => {
     createPoll(db, { createdBy: anya.id, question: "Без срока", closesAt: null, recipientIds: [anya.id] });
     expect(closeDuePolls(db, now).map((p) => p.question)).toEqual(["Пицца в пятницу?"]);
     expect(closeDuePolls(db, now)).toEqual([]);
+  });
+
+  it("опрос без срока закрывается тиком через POLL_OPEN_MAX_DAYS — и у архивного создателя тоже", () => {
+    const { db, anya, igor, poll } = stage();
+    const at = new Date("2026-09-29T09:00:00Z");
+    const minutesAgo = (m: number) => new Date(at.getTime() - m * 60_000);
+    const day = 24 * 60;
+    expect(POLL_OPEN_MAX_DAYS).toBe(3);
+    // Аня — 3 дня и минуту назад; ровно 3 дня — тоже срок; 2 дня 23 часа — ещё нет.
+    db.update(polls).set({ createdAt: minutesAgo(3 * day + 1) }).where(eq(polls.id, poll.id)).run();
+    const exact = createPoll(db, { createdBy: anya.id, question: "Ровно три дня", closesAt: null, recipientIds: [anya.id] });
+    db.update(polls).set({ createdAt: minutesAgo(3 * day) }).where(eq(polls.id, exact.id)).run();
+    const young = createPoll(db, { createdBy: anya.id, question: "Свежий", closesAt: null, recipientIds: [anya.id] });
+    db.update(polls).set({ createdAt: minutesAgo(2 * day + 23 * 60) }).where(eq(polls.id, young.id)).run();
+    // Создатель ушёл из команды — закрыть руками опрос больше некому, кроме тика.
+    const orphan = createPoll(db, { createdBy: igor.id, question: "Сирота", closesAt: null, recipientIds: [anya.id, igor.id] });
+    db.update(polls).set({ createdAt: minutesAgo(3 * day + 1) }).where(eq(polls.id, orphan.id)).run();
+    // Со сроком — живёт до срока, сколько бы дней ни прошло с создания.
+    const later = createPoll(db, { createdBy: anya.id, question: "Со сроком", closesAt: "2026-09-29T18:00", recipientIds: [anya.id] });
+    db.update(polls).set({ createdAt: minutesAgo(4 * day) }).where(eq(polls.id, later.id)).run();
+    archiveEmployee(db, igor.id, now.date);
+
+    expect(closeDuePolls(db, now, at).map((p) => p.question).sort()).toEqual(["Пицца в пятницу?", "Ровно три дня", "Сирота"].sort());
+    expect(getPoll(db, young.id)!.closedAt).toBeNull();
+    expect(getPoll(db, later.id)!.closedAt).toBeNull();
+    expect(closeDuePolls(db, now, at)).toEqual([]);
   });
 
   it("ручное закрытие после тика — отказ, то есть рассылки не будет", () => {
