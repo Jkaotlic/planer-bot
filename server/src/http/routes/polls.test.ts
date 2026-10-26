@@ -6,8 +6,9 @@ import { createEmployee, linkTelegramAccount } from "../../repo/employees";
 import { signInitData } from "../../auth/telegram";
 import { testConfig } from "../../test-config";
 import type { Db } from "../../db/client";
-import { sql } from "drizzle-orm";
-import { polls } from "../../db/schema";
+import { eq, sql } from "drizzle-orm";
+import { employees, polls } from "../../db/schema";
+import { listRecentAudit } from "../../repo/audit";
 
 function fakeBot() {
   const sent: { to: number; text: string; id: number }[] = [];
@@ -282,5 +283,95 @@ describe("письмо опроса в чате перерисовывается
     const buttons = extra.reply_markup.inline_keyboard.flat().map((b) => b.text);
     expect(buttons).toContain("✓ 👎 Против");
     expect(buttons).not.toContain("🔒 Закрыть опрос");
+  });
+});
+
+/**
+ * «Напомнить молчащим» — зеркало «Напомнить не сдавшим» у заказа: те же коды,
+ * тот же замок от двойной рассылки, тот же вид ответа и запись в журнале.
+ */
+describe("«Напомнить молчащим» по HTTP", () => {
+  const remind = (id: number, token: string) => new Request(`http://x/api/polls/${id}/remind`, send(token, {}));
+  async function openPoll(app: Awaited<ReturnType<typeof stage>>["app"], anyaT: string, ids: number[], closesTime: string | null = null) {
+    return (await (await app.request(new Request("http://x/api/polls",
+      send(anyaT, { question: "Пицца?", closesTime, audience: { kind: "picked", employeeIds: ids } })))).json()).poll as { id: number };
+  }
+
+  it("уходит только не ответившим, от запускающего; ответ «D из N»; пишет аудит", async () => {
+    const { db, app, sent, anya, igor, anyaT, igorT } = await stage();
+    const mark = db.select().from(employees).where(eq(employees.displayName, "Марк")).get()!.id;
+    const poll = await openPoll(app, anyaT, [igor, mark]);
+    await app.request(new Request(`http://x/api/polls/${poll.id}/vote`, send(igorT, { choice: "for" })));
+    await app.request(new Request(`http://x/api/polls/${poll.id}/vote`, send(anyaT, { choice: "for" })));
+    const res = await app.request(remind(poll.id, anyaT));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ delivered: 1, silent: 1, unreachable: [] });
+    expect(sent.filter((m) => m.text.startsWith("🔔")).map((m) => m.to)).toEqual([102]);
+    const row = listRecentAudit(db, 10).find((r) => r.type === "poll_reminded");
+    expect(row?.actorEmployeeId).toBe(anya);
+    expect(row?.payload).toMatchObject({ pollId: poll.id, question: "Пицца?", delivered: 1, unreachable: 0 });
+  });
+
+  it("адресат, а не запускающий и не админ, — 409 с причиной, ничего не уходит; админ — может", async () => {
+    const { db, app, sent, igor, anyaT, igorT } = await stage();
+    const poll = await openPoll(app, anyaT, [igor]);
+    const denied = await app.request(remind(poll.id, igorT));
+    expect(denied.status).toBe(409);
+    expect((await denied.json()).error).toBe("Напомнить может только тот, кто запустил опрос.");
+    expect(sent.filter((m) => m.text.startsWith("🔔"))).toHaveLength(0);
+    db.update(employees).set({ isAdmin: true }).where(eq(employees.id, igor)).run();
+    const asAdmin = await app.request(remind(poll.id, igorT));
+    expect(asAdmin.status).toBe(200);
+  });
+
+  it("посторонний — 404, как у остальных ручек опроса", async () => {
+    const { app, igor, anyaT, markT } = await stage();
+    const poll = await openPoll(app, anyaT, [igor]);
+    const res = await app.request(remind(poll.id, markT));
+    expect(res.status).toBe(404);
+    expect((await res.json()).error).toBe("Опрос не найден.");
+  });
+
+  it("закрытый и отменённый — 409: голос уже не примут, напоминать не о чем", async () => {
+    const { app, sent, igor, anyaT } = await stage();
+    const closed = await openPoll(app, anyaT, [igor]);
+    await app.request(new Request(`http://x/api/polls/${closed.id}/close`, send(anyaT, {})));
+    const r1 = await app.request(remind(closed.id, anyaT));
+    expect(r1.status).toBe(409);
+    expect((await r1.json()).error).toBe("Опрос закрыт — напоминать уже не о чем.");
+    const cancelled = await (await app.request(new Request("http://x/api/polls",
+      send(anyaT, { question: "Суши?", closesTime: null, audience: { kind: "picked", employeeIds: [igor] } })))).json();
+    await app.request(new Request(`http://x/api/polls/${cancelled.poll.id}/cancel`, send(anyaT, {})));
+    const r2 = await app.request(remind(cancelled.poll.id, anyaT));
+    expect(r2.status).toBe(409);
+    expect((await r2.json()).error).toBe("Опрос отменён — напоминать не о чем.");
+    expect(sent.filter((m) => m.text.startsWith("🔔"))).toHaveLength(0);
+  });
+
+  it("срок прошёл, а тик ещё не закрыл — тоже 409 «закрыт»: голос уже не примут", async () => {
+    const { app, sent, igor, anyaT } = await stage();
+    // 12:00 команды; срок 12:30 — потом часы уходят на 13:00.
+    const poll = await openPoll(app, anyaT, [igor], "12:30");
+    vi.setSystemTime(new Date("2026-09-29T10:00:00Z"));
+    const res = await app.request(remind(poll.id, anyaT));
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("Опрос закрыт — напоминать уже не о чем.");
+    expect(sent.filter((m) => m.text.startsWith("🔔"))).toHaveLength(0);
+  });
+
+  it("второй «Напомнить», пока первый рассылается, — 409 «Рассылка уже идёт — подожди.»; замок снимается", async () => {
+    const { app, sent, hold, igor, anyaT } = await stage();
+    const poll = await openPoll(app, anyaT, [igor]);
+    const gate = hold();
+    const first = app.request(remind(poll.id, anyaT));
+    await vi.waitFor(() => expect(gate.waiting()).toBeGreaterThan(0));
+    const second = await app.request(remind(poll.id, anyaT));
+    expect(second.status).toBe(409);
+    expect((await second.json()).error).toBe("Рассылка уже идёт — подожди.");
+    gate.release();
+    expect((await first).status).toBe(200);
+    // Молчат двое — Аня и Игорь: одна волна, два письма.
+    expect(sent.filter((m) => m.text.startsWith("🔔"))).toHaveLength(2);
+    expect((await app.request(remind(poll.id, anyaT))).status).toBe(200);
   });
 });

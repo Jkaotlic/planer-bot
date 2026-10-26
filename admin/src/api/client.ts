@@ -6,10 +6,10 @@ import type { AnnouncementRecipient, RecipientGroupView, SickApprovalRow } from 
 // Опросы, заказы еды и места — те же ответы и правила, что у мини-аппа (спека
 // 2026-10-06): типы общие из shared, чтобы две морды не разошлись в форме.
 import type {
-  AudienceCandidate, FoodSendReport, OrderRemindResult, OrderView, PlaceInput, PlaceView, PollChoice, PollView, TeamAudience,
+  AudienceCandidate, FoodSendReport, OrderRemindResult, OrderView, PlaceInput, PlaceView, PollChoice, PollRemindResult, PollView, TeamAudience,
 } from "@planer/shared";
 export type {
-  AudienceCandidate, FoodSendReport, OrderRemindResult, OrderView, PlaceInput, PlaceView, PollChoice, PollView, TeamAudience,
+  AudienceCandidate, FoodSendReport, OrderRemindResult, OrderView, PlaceInput, PlaceView, PollChoice, PollRemindResult, PollView, TeamAudience,
 } from "@planer/shared";
 export type { SickApprovalRow } from "@planer/shared";
 import type { ShiftCountsReport, AdminShortfall, CoverageAcks } from "@planer/shared";
@@ -792,6 +792,8 @@ export interface ApiClient {
   /** «Закрыть и разослать итог». Админ может и чужой — так решено ещё для мини-аппа. */
   closePoll(id: number): Promise<PollView>;
   cancelPoll(id: number): Promise<PollView>;
+  /** «Напомнить молчащим»: `silent` — знаменатель «D из N», как `unpaid` у заказа. */
+  remindPollSilent(id: number): Promise<PollRemindResult>;
   /** Места с меню — общие для всей команды. */
   getFoodPlaces(): Promise<PlaceView[]>;
   /** `id: null` — новое место, иначе правка существующего. */
@@ -1420,6 +1422,7 @@ export const realClient: ApiClient = {
   async cancelPoll(id) {
     return (await authorizedPostJson<{ poll: PollView }>(`/api/polls/${id}/cancel`, {})).poll;
   },
+  remindPollSilent: (id) => authorizedPostJson<PollRemindResult>(`/api/polls/${id}/remind`, {}),
   async getFoodPlaces() {
     return (await authorizedGet<{ places: PlaceView[] }>("/api/food-places")).places;
   },
@@ -1588,6 +1591,7 @@ const createDevClient = (): ApiClient => ({
   votePoll: (id, choice) => foodMock.votePoll(id, choice),
   closePoll: (id) => foodMock.closePoll(id),
   cancelPoll: (id) => foodMock.cancelPoll(id),
+  remindPollSilent: (id) => foodMock.remindPollSilent(id),
   getFoodPlaces: () => foodMock.getFoodPlaces(),
   saveFoodPlace: (id, input) => foodMock.saveFoodPlace(id, input),
   archiveFoodPlace: (id) => foodMock.archiveFoodPlace(id),

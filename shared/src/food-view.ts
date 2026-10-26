@@ -1,4 +1,4 @@
-import type { FoodSendReport, OrderRemindResult, OrderView, PollView } from "./api/food";
+import type { FoodSendReport, OrderRemindResult, OrderView, PollRemindResult, PollView } from "./api/food";
 import { formatMoney } from "./collection";
 import {
   FOOD_MENU_MAX, FOOD_STEP_GRAMS_MAX, FOOD_STEP_GRAMS_MIN, type FoodMenuItemShape, type FoodUnit, type PlaceInput, formatKg, itemLines, unitPart,
@@ -93,6 +93,22 @@ export function sendReportTitle(r: FoodSendReport, what: "order" | "poll" = "ord
 export function remindResultText(r: OrderRemindResult): string {
   if (r.unpaid === 0) return "Все уже сдали 🎉";
   return `Напомнил: ${r.delivered} из ${r.unpaid}` + (r.unreachable.length > 0 ? `. Не дошло: ${r.unreachable.join(", ")}` : "");
+}
+
+/** Итог «Напомнить молчащим» — тот же вид, что у дожима заказа. */
+export function pollRemindResultText(r: PollRemindResult): string {
+  if (r.silent === 0) return "Все уже ответили 🎉";
+  return `Напомнил: ${r.delivered} из ${r.silent}` + (r.unreachable.length > 0 ? `. Не дошло: ${r.unreachable.join(", ")}` : "");
+}
+
+/**
+ * Показывать ли «🔔 Напомнить молчащим». Те же условия, что у ручки
+ * `POST /api/polls/:id/remind`: управлять опросом вправе смотрящий, опрос ещё идёт
+ * (закрытому напоминать бессмысленно — голос уже не примут), и молчащие есть.
+ * Одна функция на мини-апп и консоль, чтобы кнопка не обещала того, чего ручка не сделает.
+ */
+export function canRemindSilent(p: Pick<PollView, "canManage" | "open" | "tally">): boolean {
+  return p.canManage && p.open && p.tally.silent.length > 0;
 }
 
 export interface MyOrderPayment {

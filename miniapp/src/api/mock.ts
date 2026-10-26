@@ -2018,6 +2018,7 @@ export const {
   votePoll: mockVotePoll,
   closePoll: mockClosePoll,
   cancelPoll: mockCancelPoll,
+  remindPollSilent: mockRemindPollSilent,
   getFoodPlaces: mockGetFoodPlaces,
   saveFoodPlace: mockSaveFoodPlace,
   archiveFoodPlace: mockArchiveFoodPlace,

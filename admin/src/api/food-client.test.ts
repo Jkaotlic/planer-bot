@@ -38,6 +38,7 @@ const CASES: Case[] = [
   { name: "votePoll", call: () => realClient.votePoll(3, "for"), method: "POST", path: "/api/polls/3/vote", body: { choice: "for" }, response: { poll: P }, result: P },
   { name: "closePoll", call: () => realClient.closePoll(3), method: "POST", path: "/api/polls/3/close", body: {}, response: { poll: P }, result: P },
   { name: "cancelPoll", call: () => realClient.cancelPoll(3), method: "POST", path: "/api/polls/3/cancel", body: {}, response: { poll: P }, result: P },
+  { name: "remindPollSilent", call: () => realClient.remindPollSilent(3), method: "POST", path: "/api/polls/3/remind", body: {}, response: { delivered: 1, silent: 2, unreachable: ["Марк"] }, result: { delivered: 1, silent: 2, unreachable: ["Марк"] } },
   { name: "getFoodPlaces", call: () => realClient.getFoodPlaces(), method: "GET", path: "/api/food-places", response: { places: [PL] }, result: [PL] },
   { name: "saveFoodPlace", call: () => realClient.saveFoodPlace(null, PLACE), method: "POST", path: "/api/food-places", body: PLACE, response: { place: PL }, result: PL },
   { name: "saveFoodPlace", call: () => realClient.saveFoodPlace(4, PLACE), method: "PUT", path: "/api/food-places/4", body: PLACE, response: { place: PL }, result: PL },
@@ -68,7 +69,7 @@ describe("консоль: ручки заказов, опросов и мест"
 
   it("каждый метод еды проверен строкой таблицы", () => {
     const FOOD = [
-      "getTeamAudience", "getPolls", "getPoll", "createPoll", "votePoll", "closePoll", "cancelPoll",
+      "getTeamAudience", "getPolls", "getPoll", "createPoll", "votePoll", "closePoll", "cancelPoll", "remindPollSilent",
       "getFoodPlaces", "saveFoodPlace", "archiveFoodPlace", "getOrders", "getOrder", "createOrder", "addOrderItem",
       "setOrderItemQty", "removeOrderItem", "declineOrder", "closeOrder", "cancelOrder", "setOrderPaid",
       "setOrderPaymentFor", "remindOrderUnpaid",

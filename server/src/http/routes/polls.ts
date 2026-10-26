@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { Bot } from "grammy";
 import { z } from "zod";
-import { POLL_QUESTION_MAX, closesAtFromTime, pollChoiceSchema, teamAudienceSchema, timeStr } from "@planer/shared";
+import { POLL_QUESTION_MAX, closesAtFromTime, isOpenAt, pollChoiceSchema, teamAudienceSchema, timeStr } from "@planer/shared";
 import type { Config } from "../../config";
 import type { Db } from "../../db/client";
 import { recordAudit } from "../../repo/audit";
@@ -10,9 +10,9 @@ import { teamNow } from "../../util/team-time";
 import { requireAuth, type Env } from "../middleware";
 import { jsonBody } from "../json-body";
 import {
-  cancelPoll, castVote, closePoll, createPoll, getPoll, hasRecentSamePoll, listPollsFor, normalizeQuestion, pollRecipientRows, pollView,
+  canManage, cancelPoll, castVote, closePoll, createPoll, getPoll, hasRecentSamePoll, listPollsFor, normalizeQuestion, pollRecipientRows, pollView,
 } from "../../polls/poll-service";
-import { finishPollMessages, redrawPollMessage, sendPollInvites } from "../../polls/poll-messenger";
+import { finishPollMessages, redrawPollMessage, remindSilent, sendPollInvites } from "../../polls/poll-messenger";
 
 /** Мини-апп показывает текст ошибки как есть — код «not_found» человеку ничего не скажет. */
 const NOT_FOUND = "Опрос не найден.";
@@ -42,6 +42,8 @@ export function createPollRoutes(deps: { db: Db; config: Config; bot?: Bot }): H
    * в app.ts, заведённый после таких же двойных объявлений.
    */
   const inFlight = new Set<string>();
+  /** То же для «Напомнить молчащим» — по id опроса, как `remindsInFlight` у заказов. */
+  const remindsInFlight = new Set<number>();
   const viewerOf = (c: { get(k: "auth"): { employeeId: number; isAdmin: boolean } }) => {
     const a = c.get("auth");
     return { id: a.employeeId, isAdmin: a.isAdmin };
@@ -114,6 +116,36 @@ export function createPollRoutes(deps: { db: Db; config: Config; bot?: Bot }): H
     // Письмо в чате — косметика: ответ мини-аппу её не ждёт (см. `redrawPollMessage`).
     if (bot) void redrawPollMessage(bot, db, poll, viewer.id, now);
     return c.json({ poll: pollView(db, poll, viewer, now) });
+  });
+
+  /**
+   * «Напомнить молчащим» — зеркало `POST /api/orders/:id/remind`. Отказ «нельзя» —
+   * 409 с причиной, как у закрытия, а не 403: 403 оба клиента читают как «сессия
+   * кончилась» (консоль) и «ты не зарегистрирован» (мини-апп).
+   *
+   * Только идущий опрос, в отличие от заказа (там дожим — после закрытия): голос
+   * закрытого уже не примут, и напоминание звало бы туда, где откажут. «Идёт» —
+   * `isOpenAt`, а не `closedAt`: срок мог пройти раньше, чем тик закрыл опрос.
+   */
+  app.post("/api/polls/:id/remind", auth, async (c) => {
+    const viewer = viewerOf(c);
+    const now = teamNow(config.teamTz);
+    const poll = getPoll(db, Number(c.req.param("id")));
+    if (!poll || !pollView(db, poll, viewer, now)) return c.json({ error: NOT_FOUND }, 404);
+    if (!canManage(poll, viewer)) return c.json({ error: "Напомнить может только тот, кто запустил опрос." }, 409);
+    if (poll.cancelledAt != null) return c.json({ error: "Опрос отменён — напоминать не о чем." }, 409);
+    if (!isOpenAt(poll, now)) return c.json({ error: "Опрос закрыт — напоминать уже не о чем." }, 409);
+    if (!bot) return c.json({ error: "Бот не запущен — рассылка недоступна" }, 503);
+    if (remindsInFlight.has(poll.id)) return c.json({ error: "Рассылка уже идёт — подожди." }, 409);
+    remindsInFlight.add(poll.id);
+    let outcome: Awaited<ReturnType<typeof remindSilent>>;
+    try {
+      outcome = await remindSilent(bot, db, poll, now);
+    } finally {
+      remindsInFlight.delete(poll.id);
+    }
+    recordAudit(db, "poll_reminded", viewer.id, { pollId: poll.id, question: poll.question, delivered: outcome.delivered, unreachable: outcome.unreachable.length });
+    return c.json(outcome);
   });
 
   for (const action of ["close", "cancel"] as const) {

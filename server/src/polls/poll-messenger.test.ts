@@ -4,7 +4,7 @@ import { archiveEmployee, createEmployee, linkTelegramAccount, restoreEmployee }
 import { recordApi, silentBot } from "../bot/testbot";
 import type { Db } from "../db/client";
 import { cancelPoll, castVote, closePoll, createPoll, getPoll, pollRecipientRows } from "./poll-service";
-import { finishPollMessages, redrawPollMessage, sendPollInvites } from "./poll-messenger";
+import { finishPollMessages, redrawPollMessage, remindSilent, sendPollInvites } from "./poll-messenger";
 
 const now = { date: "2026-09-29", time: "12:00" };
 
@@ -145,5 +145,61 @@ describe("перерисовка письма опроса", () => {
     closePoll(db, poll, anya);
     await redrawPollMessage(bot, db, getPoll(db, poll.id)!, igor.id, now);
     expect(api.calls.filter((c) => c.method === "editMessageText")).toHaveLength(1);
+  });
+});
+
+describe("«Напомнить молчащим»", () => {
+  // Аня спрашивает, Игорь уже ответил, Марк молчит, Даша молчит без Telegram,
+  // Вера молчит, но ушла в архив — напоминание только тем, кто ещё в команде и молчит.
+  async function stageSilent() {
+    const db = makeTestDb();
+    const anya = person(db, "Аня", 100);
+    const igor = person(db, "Игорь", 101);
+    const mark = person(db, "Марк", 102);
+    const dasha = createEmployee(db, { displayName: "Даша", inviteToken: "inv-Даша" });
+    const vera = person(db, "Вера", 104);
+    const poll = createPoll(db, {
+      createdBy: anya.id, question: "Пицца?", closesAt: "2026-09-29T18:00",
+      recipientIds: [anya.id, igor.id, mark.id, dasha.id, vera.id],
+    });
+    await sendPollInvites(silentBot().bot, db, poll, now);
+    castVote(db, poll, anya.id, "for", now);
+    castVote(db, poll, igor.id, "against", now);
+    archiveEmployee(db, vera.id, now.date);
+    const { bot } = silentBot();
+    const api = recordApi(bot);
+    return { db, poll, bot, api };
+  }
+
+  it("уходит только молчащим активным, с кнопками голоса; ответившим и архивному — нет", async () => {
+    const { db, poll, bot, api } = await stageSilent();
+    const result = await remindSilent(bot, db, poll, now);
+    expect(result).toEqual({ delivered: 1, silent: 2, unreachable: ["Даша"] });
+    expect(api.sent.map((m) => m.chat_id)).toEqual([102]);
+    const toMark = api.sent[0]!;
+    expect(toMark.text.startsWith("🔔")).toBe(true);
+    expect(toMark.text).toContain("Пицца?");
+    expect(toMark.text).toContain("до 18:00");
+    expect((toMark.reply_markup?.inline_keyboard ?? []).flat().map((b: { text: string }) => b.text))
+      .toEqual(["👍 За", "👎 Против", "🤷 Воздержался", "📊 Итоги"]);
+  });
+
+  it("бот заблокирован — человек в unreachable, delivered его не считает", async () => {
+    const { db, poll, bot } = await stageSilent();
+    bot.api.config.use((prev, method, payload, signal) => {
+      if (method === "sendMessage" && (payload as { chat_id: number }).chat_id === 102) {
+        throw new Error("Forbidden: bot was blocked by the user");
+      }
+      return prev(method, payload, signal);
+    });
+    expect(await remindSilent(bot, db, poll, now)).toEqual({ delivered: 0, silent: 2, unreachable: ["Марк", "Даша"] });
+  });
+
+  it("все ответили — никому ничего, silent = 0", async () => {
+    const { db, poll, bot, api } = await stageSilent();
+    const rows = pollRecipientRows(db, poll.id);
+    for (const r of rows) castVote(db, poll, r.employeeId, "abstain", now);
+    expect(await remindSilent(bot, db, poll, now)).toEqual({ delivered: 0, silent: 0, unreachable: [] });
+    expect(api.sent).toEqual([]);
   });
 });

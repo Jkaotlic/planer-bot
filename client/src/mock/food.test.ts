@@ -190,3 +190,30 @@ describe("createFoodMock: склейка строк как на сервере",
     await expect(mock.createOrder({ ...base, placeId: place.id, allowCustom: true, closesAt: null })).resolves.toBeTruthy();
   });
 });
+
+describe("createFoodMock: «Напомнить молчащим» — как POST /api/polls/:id/remind", () => {
+  it("молчащие активные: «дошло» — с Telegram, без него — в unreachable; ответившие не считаются", async () => {
+    const people: FoodMockPerson[] = [...PEOPLE.map((p) => ({ ...p }))];
+    const state = { employees: people, me: { id: 1, isAdmin: false } };
+    const mock = createFoodMock({ delayMs: 0, state, now: () => ({ date: "2026-10-06", time: "12:00" }) });
+    // Адресаты: Аня (сама), Игорь, Марк (без Telegram), Лена (наблюдатель, копия).
+    const { poll } = await mock.createPoll({ question: "Обед?", closesTime: null, audience: { kind: "picked", employeeIds: [2, 3] } });
+    await mock.votePoll(poll.id, "for");
+    // Лена ушла в архив — как у сервера, её уже не зовут.
+    people[3] = { ...people[3]!, isActive: false };
+    expect(await mock.remindPollSilent(poll.id)).toEqual({ delivered: 1, silent: 2, unreachable: ["Марк"] });
+  });
+
+  it("отказы — те же тексты и тот же порядок, что у сервера", async () => {
+    const { state, mock } = mockAs({ id: 1, isAdmin: false });
+    const { poll } = await mock.createPoll({ question: "Обед?", closesTime: null, audience: { kind: "team" } });
+    state.me = { id: 2, isAdmin: false };
+    await expect(mock.remindPollSilent(poll.id)).rejects.toThrow("Напомнить может только тот, кто запустил опрос.");
+    state.me = { id: 1, isAdmin: false };
+    await mock.cancelPoll(poll.id);
+    await expect(mock.remindPollSilent(poll.id)).rejects.toThrow("Опрос отменён — напоминать не о чем.");
+    const { poll: other } = await mock.createPoll({ question: "Ужин?", closesTime: null, audience: { kind: "team" } });
+    await mock.closePoll(other.id);
+    await expect(mock.remindPollSilent(other.id)).rejects.toThrow("Опрос закрыт — напоминать уже не о чем.");
+  });
+});

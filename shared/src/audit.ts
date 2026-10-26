@@ -54,7 +54,7 @@ export const AUDIT_TYPES = [
   "announcement_sent",
   // Опросы и заказы еды запускает любой работник, а не админ — журнал должен
   // отвечать «кто это разослал всей команде», если рассылка кому-то помешала.
-  "poll_created", "poll_closed", "poll_cancelled",
+  "poll_created", "poll_closed", "poll_cancelled", "poll_reminded",
   "food_place_changed",
   "recipient_group_changed",
   "order_created", "order_closed", "order_cancelled",
@@ -663,6 +663,7 @@ const DESCRIBERS: Record<AuditType, Describer> = {
   poll_created: (p) => ({ icon: "🗳", title: "Запущен опрос", lines: [str(p.question) ?? "—", `адресатов: ${num(p.recipients) ?? 0}`] }),
   poll_closed: (p) => ({ icon: "🗳", title: "Опрос закрыт", lines: [str(p.question) ?? "—"] }),
   poll_cancelled: (p) => ({ icon: "🗳", title: "Опрос отменён", lines: [str(p.question) ?? "—"] }),
+  poll_reminded: (p) => ({ icon: "🔔", title: "Напоминание молчащим об опросе", lines: [str(p.question) ?? "—", `дошло: ${num(p.delivered) ?? 0}`] }),
 
   recipient_group_changed: (p) => ({ icon: "👥", title: `Группа адресатов ${str(p.action) ?? "изменена"}`, lines: [str(p.name) ?? "—", ...(str(p.oldName) ? [`было: ${str(p.oldName)}`] : []), `людей: ${num(p.members) ?? 0}`] }),
   food_place_changed: (p) => ({ icon: "🍱", title: "Изменено место для заказа еды", lines: [str(p.name) ?? "—", str(p.action) ?? ""] }),

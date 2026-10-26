@@ -61,6 +61,39 @@ export async function redrawPollMessage(bot: Bot, db: Db, poll: Poll, employeeId
   }
 }
 
+/**
+ * «Напомнить молчащим» — зеркало `remindUnpaid` у заказа: только по кнопке
+ * запускающего или админа, только тем, кто ещё в команде и не ответил.
+ * Архивных `pollRecipientRows` уже не отдаёт — напоминать ушедшему не о чем.
+ *
+ * Письмо — то же приглашение с кнопками голоса: ответить человек должен прямо
+ * из напоминания, а не искать исходное письмо выше в чате. Отметка голоса
+ * перерисует именно напоминание (тапнутое письмо), исходное — при голосе из
+ * мини-аппа, как и раньше.
+ *
+ * `silent` — сколько молчало на момент вызова (знаменатель «D из N»);
+ * `unreachable` — кого не достучаться, поимённо: без Telegram или бот
+ * заблокирован. Нулевой `delivered` при непустом `unreachable` — не то же, что
+ * «все ответили», и вызывающий должен уметь их различить.
+ */
+export async function remindSilent(
+  bot: Bot, db: Db, poll: Poll, now: TeamClock,
+): Promise<{ delivered: number; silent: number; unreachable: string[] }> {
+  const voted = new Set(db.select({ employeeId: pollVotes.employeeId })
+    .from(pollVotes).where(eq(pollVotes.pollId, poll.id)).all().map((v) => v.employeeId));
+  const silent = pollRecipientRows(db, poll.id).filter((r) => !voted.has(r.employeeId));
+  let delivered = 0;
+  const unreachable: string[] = [];
+  for (const r of silent) {
+    if (r.telegramUserId == null) { unreachable.push(r.displayName); continue; }
+    const text = `🔔 Напоминаю: ждём твоего ответа.\n\n${pollTextFor(db, poll, r.employeeId, now.date)}`;
+    const keyboard = pollKeyboard(poll.id, null, r.employeeId === poll.createdBy);
+    if (await notifyUser(bot, r.telegramUserId, text, keyboard)) delivered += 1;
+    else unreachable.push(r.displayName);
+  }
+  return { delivered, silent: silent.length, unreachable };
+}
+
 export async function sendPollInvites(bot: Bot, db: Db, poll: Poll, now: TeamClock): Promise<number> {
   let delivered = 0;
   for (const r of pollRecipientRows(db, poll.id)) {

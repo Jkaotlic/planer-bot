@@ -1,7 +1,7 @@
 import {
   FOOD_CLOSE_HORIZON_DAYS, dateStr, FOOD_ITEMS_PER_PERSON_MAX, FOOD_QTY_MAX, announcementRole, closesAtFromTime, closesLabel, debtOf, debtors, dishSummary, itemsLimitText, qtyLimitText,
   isFutureClose, isOpenAt, isWithinCloseHorizon, orderItemInputSchema, orderTotal, paymentProgress, placeInputSchema, pollTally,
-  type AudienceCandidate, type FoodSendReport, type FoodUnit, type OrderRemindResult, type OrderView, type PlaceInput, type PlaceView,
+  type AudienceCandidate, type FoodSendReport, type FoodUnit, type OrderRemindResult, type OrderView, type PollRemindResult, type PlaceInput, type PlaceView,
   type PollChoice, type PollView, type TeamAudience,
 } from "@planer/shared";
 import { delay } from "./delay";
@@ -228,6 +228,22 @@ export function createFoodMock(opts: FoodMockOptions) {
     const p = pollOrThrow(id);
     p.cancelledAt = new Date().toISOString();
     return pollViewOf(p);
+  }
+
+  /** «Напомнить молчащим» — тот же порядок отказов и тот же ответ, что у
+   *  `POST /api/polls/:id/remind`: права, «отменён ли», «идёт ли»; молчащие —
+   *  только те, кто ещё в команде (`pollRecipientRows` сервера архивных не отдаёт). */
+  async function remindPollSilent(id: number): Promise<PollRemindResult> {
+    await wait();
+    const p = pollOrThrow(id);
+    if (!(p.createdBy === me().id || me().isAdmin)) throw new Error("Напомнить может только тот, кто запустил опрос.");
+    if (p.cancelledAt != null) throw new Error("Опрос отменён — напоминать не о чем.");
+    if (!isOpenAt(p, clock())) throw new Error("Опрос закрыт — напоминать уже не о чем.");
+    const silent = p.recipients
+      .map((rid) => staff().find((e) => e.id === rid))
+      .filter((e): e is FoodMockPerson => e != null && e.isActive && !p.votes.has(e.id));
+    const unreachable = silent.filter((e) => e.telegramUserId == null).map((e) => e.displayName);
+    return { delivered: silent.length - unreachable.length, silent: silent.length, unreachable };
   }
 
   // --- Места и меню --------------------------------------------------------
@@ -654,7 +670,7 @@ export function createFoodMock(opts: FoodMockOptions) {
   }
 
   return {
-    getTeamAudience, getPolls, getPoll, createPoll, votePoll, closePoll, cancelPoll,
+    getTeamAudience, getPolls, getPoll, createPoll, votePoll, closePoll, cancelPoll, remindPollSilent,
     getFoodPlaces, saveFoodPlace, archiveFoodPlace,
     getOrders, getOrder, createOrder, addOrderItem, setOrderItemQty, removeOrderItem, declineOrder,
     closeOrder, cancelOrder, setOrderPaid, setOrderPaymentFor, remindOrderUnpaid,
