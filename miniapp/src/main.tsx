@@ -5,13 +5,13 @@ import "./mockEnv";
 import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { AppRoot } from "@telegram-apps/telegram-ui";
-import { isThemeParamsDark, useSignal } from "@telegram-apps/sdk-react";
 
 import "@telegram-apps/telegram-ui/dist/styles.css";
 import "./index.css";
 import "./ui/ui.css";
 
 import { App } from "./App";
+import { useIsDark } from "./lib/theme";
 import { CrashBoundary } from "./components/CrashBoundary";
 import { init } from "./init";
 
@@ -20,7 +20,7 @@ init();
 function Root() {
   // Reflect the (real or mocked) Telegram theme's light/dark-ness natively,
   // rather than trusting AppRoot's own browser-only auto-detection.
-  const isDark = useSignal(isThemeParamsDark);
+  const isDark = useIsDark();
 
   /**
    * Нативные контролы красит браузер, и он смотрит на `color-scheme`, а не на
