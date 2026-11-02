@@ -32,6 +32,13 @@ updates:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
 
+  - package-ecosystem: npm
+    directory: "/e2e"
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: chore
+
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
