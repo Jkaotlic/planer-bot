@@ -52,6 +52,7 @@ export const state = {};
 export const env = {
   PATH: process.env.PATH,
   HOME: process.env.HOME,
+  E2E_CLOCK_OFFSET: process.env.E2E_CLOCK_OFFSET,
   FAKE_TG_PORT: String(TG),
   PORT: String(PORT),
   BOT_TOKEN,

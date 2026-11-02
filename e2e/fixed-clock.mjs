@@ -13,7 +13,10 @@ anchor.setUTCHours(8, 0, 0, 0);
 const daysSinceMonday = (anchor.getUTCDay() + 6) % 7;
 let monday = anchor.getTime() - daysSinceMonday * DAY_MS;
 if (monday > realNow) monday -= 7 * DAY_MS;
-const offset = monday - realNow;
+// Смещение одно на все процессы: посчитанное заново при рестарте сервера, оно прыгнуло
+// бы на неделю, если прогон пересёк границу понедельника, и токены разом бы истекли.
+process.env.E2E_CLOCK_OFFSET ??= String(monday - realNow);
+const offset = Number(process.env.E2E_CLOCK_OFFSET);
 globalThis.Date = class extends RealDate {
   constructor(...args) {
     if (args.length === 0) super(RealDate.now() + offset);
