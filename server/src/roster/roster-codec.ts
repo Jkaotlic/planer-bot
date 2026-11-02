@@ -1,4 +1,4 @@
-import { neutralizeCsvFormula, restoreCsvFormula, resolveShiftTimes, nextDate, type EntryCategory } from "@planer/shared";
+import { csvCell, restoreCsvFormula, resolveShiftTimes, nextDate, type EntryCategory } from "@planer/shared";
 import type { Shift, ShiftTemplate } from "../db/schema";
 
 export type RosterCell = { date: string; code: string };
@@ -268,11 +268,6 @@ export function toRuDate(iso: string): string {
   return `${d}.${m}.${y}`;
 }
 
-function rosterField(raw: string): string {
-  const v = neutralizeCsvFormula(raw);
-  return /[";\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
-}
-
 /** One entry -> its roster code. An unread cell wins over everything (it keeps the
  *  original text), then the preset, then the absence category, else non-working. */
 export function encodeEntryCode(
@@ -298,6 +293,6 @@ export function serializeRosterCsv(dates: string[], rows: { name: string; codes:
   // that text came from a quoted Excel field — so it really can carry ';' or '"'.
   // Unescaped, the row grows a column and the export produces a file its own import
   // refuses with «строка 2: 3 клеток, а в шапке 2 дат».
-  const lines = rows.map((r) => [rosterField(r.name), ...r.codes.map(rosterField)].join(";"));
+  const lines = rows.map((r) => [csvCell(r.name), ...r.codes.map(csvCell)].join(";"));
   return [header, ...lines].join("\r\n");
 }

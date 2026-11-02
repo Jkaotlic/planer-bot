@@ -1,5 +1,5 @@
 import { countsForBalance, UNRECOGNISED_KIND, type EntryCategory, type TemplateAccent } from "./category";
-import { neutralizeCsvFormula } from "./csv-encoding";
+import { csvCell } from "./csv-encoding";
 
 /**
  * «Кто сколько отдежурил» — один подсчёт на сервер и на моки обеих морд.
@@ -153,11 +153,6 @@ export function tallyShiftCounts(p: {
   return { from: p.from, to: p.to, kinds, rows: [...rows.values()] };
 }
 
-function csvField(raw: string): string {
-  const value = neutralizeCsvFormula(raw);
-  return /[";\r\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
-}
-
 const GROUP_TOTAL_TITLES: Record<ShiftCountsGroup, string> = {
   shift: "Смен всего",
   duty: "Дежурств всего",
@@ -177,7 +172,7 @@ export function shiftCountsCsv(report: ShiftCountsReport): string {
     for (const kind of kinds) columns.push({ title: kind.name, value: (row) => row.byKind[kind.name] ?? 0 });
     columns.push({ title: GROUP_TOTAL_TITLES[group], value: (row) => row.byGroup[group] });
   }
-  const header = ["Работник", ...columns.map((c) => c.title)].map(csvField).join(";");
-  const lines = report.rows.map((row) => [csvField(row.displayName), ...columns.map((c) => String(c.value(row)))].join(";"));
+  const header = ["Работник", ...columns.map((c) => c.title)].map(csvCell).join(";");
+  const lines = report.rows.map((row) => [csvCell(row.displayName), ...columns.map((c) => String(c.value(row)))].join(";"));
   return [header, ...lines].join("\r\n");
 }

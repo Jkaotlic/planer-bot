@@ -52,3 +52,12 @@ export function neutralizeCsvFormula(value: string): string {
 export function restoreCsvFormula(value: string): string {
   return value.startsWith("'") && FORMULA_START.test(value) ? value.slice(1) : value;
 }
+
+/**
+ * Одна клетка выгрузки. Кавычится и чужой разделитель: файл через запятую русский
+ * Excel делит по `;`, и незакавыченное `a;=1+1` дало бы отдельную клетку-формулу.
+ */
+export function csvCell(raw: string): string {
+  const value = neutralizeCsvFormula(raw);
+  return /[",;\r\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
+}

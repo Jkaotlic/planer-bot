@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { neutralizeCsvFormula, shiftDurationHours, isDayOff, isAbsence, takesPartInAssignment, type AssignReason, type EntryCategory } from "@planer/shared";
+import { csvCell, shiftDurationHours, isDayOff, isAbsence, takesPartInAssignment, type AssignReason, type EntryCategory } from "@planer/shared";
 import type { Db } from "../db/client";
 import { loadCalendar } from "../repo/calendar-days";
 import { weekendAssignments, type Shift, type VacantSlot, type WeekendAssignment } from "../db/schema";
@@ -396,13 +396,8 @@ export function payrollRows(
   return rows.sort((a, b) => a.employeeName.localeCompare(b.employeeName) || a.date.localeCompare(b.date));
 }
 
-function csvField(raw: string): string {
-  const v = neutralizeCsvFormula(raw);
-  return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
-}
-
 export function payrollCsv(rows: { employeeName: string; date: string; hours: number }[]): string {
-  const lines = rows.map((r) => [csvField(r.employeeName), r.date, String(r.hours)].join(","));
+  const lines = rows.map((r) => [csvCell(r.employeeName), r.date, String(r.hours)].join(","));
   return ["Работник,Дата,Часы", ...lines].join("\n");
 }
 
