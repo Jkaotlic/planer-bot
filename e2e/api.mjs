@@ -2,10 +2,28 @@
 // настоящий HTTP. Заменён только Telegram: это единственная внешняя сторона, и второй
 // опрос на боевом токене дал бы дубли письмами всей команде. Поэтому токен выдуманный.
 import { spawn } from "node:child_process";
+import http from "node:http";
 import { mkdtempSync, rmSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fakeTelegram, initData, BOT_TOKEN, sleep, until } from "./lib.mjs";
+// Без переиспользования соединений: Node закрывает простаивающее через 5 с, и запрос,
+// попавший в этот миг, получает ECONNRESET (замер: 1 из 2400). Сценариям это шум, а
+// повтор мог бы скрыть настоящий обрыв. Сама гонка записана в docs/audit/ledger.md.
+function fetch(url, init = {}) {
+  return new Promise((done, fail) => {
+    const req = http.request(url, { method: init.method ?? "GET", headers: init.headers, agent: false }, (res) => {
+      const chunks = [];
+      res.on("data", (c) => chunks.push(c));
+      res.on("end", () => {
+        const body = Buffer.concat(chunks).toString();
+        done({ status: res.statusCode, headers: new Headers(res.headers), text: async () => body });
+      });
+    });
+    req.on("error", fail);
+    req.end(init.body);
+  });
+}
 export const here = import.meta.dirname;
 const REPO = resolve(here, "..");
 export const PORT = 18090,
