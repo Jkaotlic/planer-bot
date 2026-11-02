@@ -17,6 +17,7 @@
     "test:watch": "vitest",
     "lint": "biome lint .",
     "lint:fix": "biome lint --write .",
+    "e2e": "VITE_BOT_USERNAME=e2e_test_bot npm run build -w @planer/miniapp && VITE_BOT_USERNAME=e2e_test_bot npm run build -w @planer/admin && npm start --prefix e2e",
     "typecheck": "tsc -p shared/tsconfig.json && tsc -p client/tsconfig.json && tsc -p server/tsconfig.json && tsc -p admin/tsconfig.json && tsc -p miniapp/tsconfig.json"
   },
   "devDependencies": {

@@ -52,3 +52,39 @@ jobs:
 
       - name: Build admin UI
         run: npm run build --workspace @planer/admin
+
+  # Отдельным заданием, чтобы красный е2е не прятал результат гейта и наоборот. Браузер
+  # живёт в своём пакете e2e/: в корневом lockfile он уехал бы в `npm ci` папки прода.
+  e2e:
+    name: End-to-end
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Install e2e dependencies
+        run: npm ci --prefix e2e
+
+      - name: Install Chromium
+        run: npx --prefix e2e playwright-core install --with-deps chromium
+
+      - name: Run e2e
+        run: npm run e2e
+
+      - name: Upload screenshots and server log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-out
+          path: e2e/.out

@@ -1,0 +1,12 @@
+{
+  "name": "@planer/e2e",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node --import ./fixed-clock.mjs run.mjs"
+  },
+  "dependencies": {
+    "playwright-core": "1.62.1"
+  }
+}
