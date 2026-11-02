@@ -148,6 +148,13 @@ describe("buildShiftCountsReport", () => {
 });
 
 describe("shiftCountsCsv", () => {
+  it("имя-формула выгружается погашенной", () => {
+    const db = makeTestDb();
+    createEmployee(db, { displayName: "=HYPERLINK(1)" });
+    const csv = shiftCountsCsv(buildShiftCountsReport(db, JUNE.from, JUNE.to));
+    expect(csv).toContain("'=HYPERLINK(1)");
+  });
+
   it("колонки по группам, после группы её итог; общего «Всего» нет", () => {
     const db = makeTestDb();
     const a = createEmployee(db, { displayName: "Первый" }).id;

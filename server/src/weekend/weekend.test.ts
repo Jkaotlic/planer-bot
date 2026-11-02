@@ -69,6 +69,11 @@ describe("weekend market service", () => {
     expect(csv).toContain("Аня,2026-07-18,8");
   });
 
+  it("имя-формула в выгрузке для бухгалтерии не исполняется в Excel", () => {
+    const csv = payrollCsv([{ employeeName: "=HYPERLINK(1)", date: "2026-07-18", hours: 8 }]);
+    expect(csv).toContain("'=HYPERLINK(1),2026-07-18,8");
+  });
+
   it("assigning someone leaves the slot open — a slot can take several people", () => {
     const db = makeTestDb();
     const worker = createEmployee(db, { displayName: "Игорь" });

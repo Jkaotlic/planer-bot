@@ -1,4 +1,5 @@
 import { countsForBalance, UNRECOGNISED_KIND, type EntryCategory, type TemplateAccent } from "./category";
+import { neutralizeCsvFormula } from "./csv-encoding";
 
 /**
  * «Кто сколько отдежурил» — один подсчёт на сервер и на моки обеих морд.
@@ -152,7 +153,8 @@ export function tallyShiftCounts(p: {
   return { from: p.from, to: p.to, kinds, rows: [...rows.values()] };
 }
 
-function csvField(value: string): string {
+function csvField(raw: string): string {
+  const value = neutralizeCsvFormula(raw);
   return /[";\r\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
 }
 

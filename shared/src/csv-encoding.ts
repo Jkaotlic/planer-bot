@@ -34,3 +34,21 @@ export function decodeCsvBytes(bytes: ArrayBuffer | Uint8Array): DecodedCsv {
 export async function readCsvFile(file: Blob): Promise<DecodedCsv> {
   return decodeCsvBytes(await file.arrayBuffer());
 }
+
+/**
+ * Клетка, с которой Excel начал бы формулу.
+ *
+ * Выгрузки открывают двойным щелчком, а имя и подпись вводятся руками: `=HYPERLINK(...)`
+ * в имени становилось рабочей ссылкой в таблице бухгалтера. Апострофы впереди тоже
+ * считаются, иначе имя `'=x` после импорта потеряло бы свой апостроф.
+ */
+const FORMULA_START = /^'*[=+\-@\t\r]/;
+
+export function neutralizeCsvFormula(value: string): string {
+  return FORMULA_START.test(value) ? `'${value}` : value;
+}
+
+/** Обратно к `neutralizeCsvFormula`: ростер импортируется из той же выгрузки, и имя не должно обрасти апострофом. */
+export function restoreCsvFormula(value: string): string {
+  return value.startsWith("'") && FORMULA_START.test(value) ? value.slice(1) : value;
+}
