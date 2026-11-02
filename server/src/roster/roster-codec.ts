@@ -1,4 +1,4 @@
-import { resolveShiftTimes, nextDate, type EntryCategory } from "@planer/shared";
+import { neutralizeCsvFormula, restoreCsvFormula, resolveShiftTimes, nextDate, type EntryCategory } from "@planer/shared";
 import type { Shift, ShiftTemplate } from "../db/schema";
 
 export type RosterCell = { date: string; code: string };
@@ -83,7 +83,7 @@ export function parseRosterCsv(text: string): ParsedRoster {
   assertConsecutive(dates);
   const people = lines.slice(1).map((line, index) => {
     const fields = parseRosterLine(line);
-    const name = fields[0].trim();
+    const name = restoreCsvFormula(fields[0].trim());
     // A ragged row is never harmless: padding a short one out writes "не работает"
     // onto days the file never described, and a long one silently drops its tail.
     // Excel always emits full-width rows, so a mismatch means the file was edited by
@@ -95,7 +95,7 @@ export function parseRosterCsv(text: string): ParsedRoster {
     }
     return {
       name,
-      cells: dates.map((date, i) => ({ date, code: (fields[i + 1] ?? "").trim() })),
+      cells: dates.map((date, i) => ({ date, code: restoreCsvFormula((fields[i + 1] ?? "").trim()) })),
     };
   });
   return { dates, people };
@@ -268,7 +268,8 @@ export function toRuDate(iso: string): string {
   return `${d}.${m}.${y}`;
 }
 
-function rosterField(v: string): string {
+function rosterField(raw: string): string {
+  const v = neutralizeCsvFormula(raw);
   return /[";\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
 }
 

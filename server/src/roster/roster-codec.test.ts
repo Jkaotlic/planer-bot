@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { parseRosterCsv, decodeRoster, CODE_TO_PRESET_NAME, PRESET_NAME_TO_CODE } from "./roster-codec";
+import { serializeRosterCsv, parseRosterCsv, decodeRoster, CODE_TO_PRESET_NAME, PRESET_NAME_TO_CODE } from "./roster-codec";
 import { makeTestDb } from "../db/testdb";
 import { listActiveTemplates } from "../repo/templates";
 
@@ -199,5 +199,21 @@ describe("rezerv — резервный дежурный", () => {
 
     expect(decoded.perPerson[0]!.entries).toHaveLength(2);
     expect(decoded.perPerson[0]!.entries.every((e) => e.endDate === null)).toBe(true);
+  });
+});
+
+describe("формула в ростере", () => {
+  const dates = ["2026-07-01"];
+
+  it("имя и код-формула выгружаются погашенными", () => {
+    const csv = serializeRosterCsv(dates, [{ name: "=HYPERLINK(1)", codes: ["@SUM(A1)"] }]);
+    expect(csv.split("\r\n")[1]).toBe("'=HYPERLINK(1);'@SUM(A1)");
+  });
+
+  it("обратный импорт возвращает значения как были", () => {
+    const csv = serializeRosterCsv(dates, [{ name: "=HYPERLINK(1)", codes: ["-"] }]);
+    expect(parseRosterCsv(csv).people).toEqual([
+      { name: "=HYPERLINK(1)", cells: [{ date: "2026-07-01", code: "-" }] },
+    ]);
   });
 });
