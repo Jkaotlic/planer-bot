@@ -15,6 +15,7 @@ import { Keyboard } from "grammy";
  */
 export const BTN_WEEK = "📅 График";
 export const BTN_MY_SHIFTS = "📋 Мои смены";
+export const BTN_MY_WEEK = "🗓 Моя неделя";
 /** Entry to «Сервисы»: food orders and polls, the QR code, and whatever comes next. */
 export const BTN_SERVICES = "🧰 Сервисы";
 /**
@@ -55,12 +56,14 @@ export const BTN_BUG = "🐞 Проблема";
  * служебная, поэтому едет во вторую строку рядом с «Напоминаниями», а не
  * заводит третью.
  */
-export function mainKeyboard(opts: { isAdmin: boolean }): Keyboard {
+export function mainKeyboard(opts: { isAdmin: boolean; myWeekWidgetEnabled?: boolean }): Keyboard {
   const kb = new Keyboard().text(BTN_WEEK).text(BTN_MY_SHIFTS);
   // Третьей в первую строку, а не отдельной строкой: во второй уже три
   // служебные, а лишняя строка — это снова клавиатура на пол-экрана.
   // У всех, наблюдателя тоже: он обедает с командой (решение 2026-09-30).
   kb.text(BTN_SERVICES);
+  // Отдельная строка сохраняет привычные входы и не сжимает четыре подписи в ряд.
+  if (opts.myWeekWidgetEnabled) kb.row().text(BTN_MY_WEEK);
   kb.row().text(BTN_REMINDERS).text(BTN_BUG);
   if (opts.isAdmin) kb.text(BTN_ADMIN);
   // resized — иначе клавиатура занимает пол-экрана. persistent — иначе Telegram

@@ -32,6 +32,7 @@ const schema = z.object({
   JWT_SECRET: z.string().min(32),
   PUBLIC_URL: z.string().url(),
   BOT_USERNAME: z.string().optional(),
+  MY_WEEK_WIDGET_ENABLED: z.enum(["true", "false"]).default("false"),
   /**
    * Пороги лестницы передачи смены: сколько ждём ответа адресата, прежде чем
    * звать всех, и за сколько часов до смены зовём админов.
@@ -54,6 +55,7 @@ export interface Config {
   jwtSecret: string;
   publicUrl: string;
   botUsername?: string;
+  myWeekWidgetEnabled: boolean;
   handoverFanHours: number;
   handoverEscalateHours: number;
 }
@@ -74,6 +76,7 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     jwtSecret: e.JWT_SECRET,
     publicUrl: e.PUBLIC_URL,
     botUsername: e.BOT_USERNAME,
+    myWeekWidgetEnabled: e.MY_WEEK_WIDGET_ENABLED === "true",
     handoverFanHours: e.HANDOVER_FAN_HOURS,
     handoverEscalateHours: e.HANDOVER_ESCALATE_HOURS,
   };

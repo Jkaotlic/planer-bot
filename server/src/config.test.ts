@@ -9,6 +9,12 @@ const base = {
 };
 
 describe("loadConfig", () => {
+  it("виджет выключен по умолчанию и включается только явным true", () => {
+    expect(loadConfig(base).myWeekWidgetEnabled).toBe(false);
+    expect(loadConfig({ ...base, MY_WEEK_WIDGET_ENABLED: "false" }).myWeekWidgetEnabled).toBe(false);
+    expect(loadConfig({ ...base, MY_WEEK_WIDGET_ENABLED: "true" }).myWeekWidgetEnabled).toBe(true);
+    expect(() => loadConfig({ ...base, MY_WEEK_WIDGET_ENABLED: "yes" })).toThrow(/MY_WEEK_WIDGET_ENABLED/);
+  });
   it("parses a valid env with defaults", () => {
     const cfg = loadConfig(base);
     expect(cfg.adminTelegramIds).toEqual([111, 222]);

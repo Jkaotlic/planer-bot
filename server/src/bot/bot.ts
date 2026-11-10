@@ -34,7 +34,8 @@ import { teamNow } from "../util/team-time";
 import { addressOf, parseSavedQrStyle, addDaysIso, mondayOfIso, ADMIN_NOTICE_KINDS, ADMIN_NOTICE_LABELS, autoSendDateFor, autoSendLabel, canAnnounce, canAddOwnShifts, isCollectionActive, formatDayMonth } from "@planer/shared";
 import { buildWeekImage, type WeekImage } from "./week-image";
 import { buildQrImage } from "./qr-image";
-import { mainKeyboard, BTN_WEEK, BTN_MY_SHIFTS, BTN_SERVICES, LEGACY_BTN_FOOD, BTN_REMINDERS, BTN_ADMIN, BTN_BUG } from "./keyboard";
+import { mainKeyboard, BTN_WEEK, BTN_MY_SHIFTS, BTN_MY_WEEK, BTN_SERVICES, LEGACY_BTN_FOOD, BTN_REMINDERS, BTN_ADMIN, BTN_BUG } from "./keyboard";
+import { installMyWeekWidget } from "./my-week-widget";
 import { installFoodHandlers } from "./food-handlers";
 import {
   notifyUser,
@@ -396,6 +397,8 @@ export function createBot(deps: BotDeps): Bot {
   // сейчас — поэтому вызов обязан стоять выше catch-all
   // `bot.on("callback_query:data", …)` в конце файла, иначе тот перехватит их первым.
   const food = installFoodHandlers(bot, { db, config, acting, actsAsAdmin });
+  const myWeek = installMyWeekWidget(bot, { db, config, acting, openMiniApp: sendMiniApp });
+  bot.command("myweek", ctx => myWeek.send(ctx));
 
   /** Что можно доложить к текстовому ответу: у `/admin` это отключённое превью ссылки. */
   type MenuExtra = { link_preview_options?: { is_disabled: boolean } };
@@ -419,7 +422,7 @@ export function createBot(deps: BotDeps): Bot {
     if (!me) return undefined;
     const allowlisted = config.adminTelegramIds.includes(tgId);
     if (!me.isActive && !allowlisted) return undefined;
-    return mainKeyboard({ isAdmin: me.isAdmin || allowlisted });
+    return mainKeyboard({ isAdmin: me.isAdmin || allowlisted, myWeekWidgetEnabled: config.myWeekWidgetEnabled });
   }
 
   /**
@@ -1351,6 +1354,7 @@ export function createBot(deps: BotDeps): Bot {
     const text = ctx.msg.text;
     if (text === BTN_WEEK) await sendWeek(ctx);
     else if (text === BTN_MY_SHIFTS) await sendMiniApp(ctx);
+    else if (text === BTN_MY_WEEK) await myWeek.send(ctx);
     else if (text === BTN_SERVICES || text === LEGACY_BTN_FOOD) await food.sendServicesMenu(ctx);
     else if (text === BTN_REMINDERS) await sendReminders(ctx);
     else if (text === BTN_ADMIN) await sendAdminLink(ctx);
