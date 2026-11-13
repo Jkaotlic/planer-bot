@@ -1,14 +1,14 @@
 export const checklistWidgetHtml = `<style>
 body{margin:0;padding:12px;font-family:system-ui;color:var(--tg-theme-text-color)}
-h3,p{margin:0}h3{font-size:1.14em;overflow-wrap:anywhere;margin:4px 0 8px}
+h3,p{margin:0}h3{font-size:1.14em;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin:4px 0 8px}
 .meta,#status{font-size:.84em;color:var(--tg-theme-hint-color)}
 .head,.nav{display:flex;justify-content:space-between;align-items:center;gap:6px}
-#intro{padding:8px 10px;margin-bottom:10px;border-left:3px solid var(--tg-theme-link-color);background:var(--tg-theme-secondary-bg-color);font-size:.9em;overflow-wrap:anywhere}
+#intro{box-sizing:border-box;padding:8px 10px;margin-bottom:10px;border-left:3px solid var(--tg-theme-link-color);background:var(--tg-theme-secondary-bg-color);font-size:.9em;line-height:1.25;max-height:8em;overflow:hidden;overflow-wrap:anywhere}
 #progress{font-weight:650;font-size:.94em}
 .track{height:5px;background:var(--tg-theme-secondary-bg-color);border-radius:4px;margin:6px 0 10px;overflow:hidden}
 #bar{height:100%;background:var(--tg-theme-link-color)}
 .item{display:flex;align-items:center;gap:9px;box-sizing:border-box;width:100%;text-align:left;margin:5px 0;min-height:44px;padding:8px 10px;white-space:normal}
-.item-label{min-width:0;overflow-wrap:anywhere}
+.item-label{min-width:0;line-height:1.25;max-height:3.75em;overflow:hidden;overflow-wrap:anywhere}
 .box{display:grid;place-items:center;flex:0 0 20px;height:20px;box-sizing:border-box;border:1px solid var(--tg-theme-hint-color);border-radius:5px}
 .checked .box{border-color:var(--tg-theme-button-color);background:var(--tg-theme-button-color);color:var(--tg-theme-button-text-color)}
 button{font:inherit;border:0;border-radius:8px;background:var(--tg-theme-secondary-bg-color);color:var(--tg-theme-text-color)}
