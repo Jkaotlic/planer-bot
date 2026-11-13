@@ -55,6 +55,7 @@ describe("runChecklistTick", () => {
     vi.setSystemTime(new Date(`${TODAY}T08:05:00+03:00`));
     try {
       const { db, igor, list } = stage({ items: ["Свет", "Окна", "Двери", "Лифты"] });
+      updateChecklist(db, list.id, { note: "Начни обход с лифтов" });
       const enabled = { ...config, checklistWidgetEnabled: true };
       const bot = stubBotInfo(createBot({ db, config: enabled }));
       const { calls } = recordApi(bot);
@@ -63,6 +64,7 @@ describe("runChecklistTick", () => {
       const outgoing = calls.filter(c => c.method === "sendWidget");
       expect(outgoing).toHaveLength(1);
       const state = JSON.parse(outgoing[0]!.payload.chat_data);
+      expect(state.intro).toBe("Начни обход с лифтов");
       expect(outgoing[0]!.payload.caption).toContain("Свет");
       const item = state.items[0][0];
       const request = (data: string, id: number, chatId = 333) => bot.handleUpdate({
@@ -76,6 +78,7 @@ describe("runChecklistTick", () => {
       await request(state.scope + ":p1", 15);
       const page = JSON.parse(calls.filter(c => c.method === "answerWidgetQuery").at(-1)!.payload.data);
       expect(page.items[0][1]).toBe("Лифты");
+      expect(page.intro).toBe("Начни обход с лифтов");
       // Три отметки пришли через другой интерфейс, карточка должна их учесть.
       for (const id of [state.items[1][0], state.items[2][0], page.items[0][0]]) {
         setMark(db, { date: TODAY, employeeId: igor.id, itemId: id, done: true });
@@ -100,6 +103,18 @@ describe("runChecklistTick", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("вписывает пояснение и длинные заголовки с эмодзи в лимит данных Telegram", async () => {
+    const { db, list } = stage({ items: Array(3).fill("🧰".repeat(45)) });
+    updateChecklist(db, list.id, { name: "🧰".repeat(40), note: "🧰".repeat(120) });
+    const enabled = { ...config, checklistWidgetEnabled: true };
+    const bot = stubBotInfo(createBot({ db, config: enabled }));
+    const { calls } = recordApi(bot);
+    expect(await runChecklistTick(db, bot, enabled, { date: TODAY, time: "08:05" })).toBe(1);
+    const widget = calls.find(c => c.method === "sendWidget")!;
+    expect(Buffer.byteLength(widget.payload.chat_data)).toBeLessThanOrEqual(1024);
+    expect(JSON.parse(widget.payload.chat_data).intro).toMatch(/^🧰/u);
   });
 
   it("при отказе формата сохраняет полный текст и отправляет инструкцию один раз", async () => {

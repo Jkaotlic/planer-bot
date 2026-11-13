@@ -52,15 +52,25 @@ function snapshot(db: Db, secret: string, scope: ChecklistContext, page: number,
   const pages = Math.ceil(items.length / PAGE_SIZE);
   const itemIndex = itemId === undefined ? -1 : items.findIndex(item => item.id === itemId);
   page = itemIndex < 0 ? Math.min(page, pages - 1) : Math.floor(itemIndex / PAGE_SIZE);
-  return {
+  const state = {
     scope: `cl:${scope.date}:${scope.checklistId.toString(36)}:${signature(secret, scope)}`,
     name: label(list.name, 40),
     date: formatDayMonth(scope.date),
+    intro: "",
     ...checklistProgress(items, marked),
     page, pages,
     items: items.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
       .map(item => [item.id, label(item.title, 45), marked.includes(item.id)] as const),
   };
+  // Лимит Telegram относится к JSON в байтах, включая кавычки и экранирование.
+  const intro = label(list.note ?? "", 160);
+  const chars = Array.from(intro);
+  state.intro = intro;
+  while (Buffer.byteLength(JSON.stringify(state)) > 1024 && chars.length > 0) {
+    chars.pop();
+    state.intro = chars.length ? chars.join("") + "…" : "";
+  }
+  return state;
 }
 
 export async function sendChecklistWidget(
