@@ -34,6 +34,7 @@ const schema = z.object({
   BOT_USERNAME: z.string().optional(),
   MY_WEEK_WIDGET_ENABLED: z.enum(["true", "false"]).default("false"),
   SHIFT_REMINDER_WIDGET_ENABLED: z.enum(["true", "false"]).default("false"),
+  CHECKLIST_WIDGET_ENABLED: z.enum(["true", "false"]).default("false"),
   /**
    * Пороги лестницы передачи смены: сколько ждём ответа адресата, прежде чем
    * звать всех, и за сколько часов до смены зовём админов.
@@ -58,6 +59,7 @@ export interface Config {
   botUsername?: string;
   myWeekWidgetEnabled: boolean;
   shiftReminderWidgetEnabled: boolean;
+  checklistWidgetEnabled: boolean;
   handoverFanHours: number;
   handoverEscalateHours: number;
 }
@@ -80,6 +82,7 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     botUsername: e.BOT_USERNAME,
     myWeekWidgetEnabled: e.MY_WEEK_WIDGET_ENABLED === "true",
     shiftReminderWidgetEnabled: e.SHIFT_REMINDER_WIDGET_ENABLED === "true",
+    checklistWidgetEnabled: e.CHECKLIST_WIDGET_ENABLED === "true",
     handoverFanHours: e.HANDOVER_FAN_HOURS,
     handoverEscalateHours: e.HANDOVER_ESCALATE_HOURS,
   };

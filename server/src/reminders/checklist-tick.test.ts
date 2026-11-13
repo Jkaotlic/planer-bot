@@ -10,6 +10,10 @@ import { testConfig } from "../test-config";
 import { runChecklistTick } from "./checklist-tick";
 import type { Db } from "../db/client";
 import { reminderLog } from "../db/schema";
+import { createBot } from "../bot/bot";
+import { recordApi, stubBotInfo } from "../bot/testbot";
+import { listMarksFor } from "../repo/checklist";
+import { listRecentAudit } from "../repo/audit";
 
 const config = testConfig();
 
@@ -46,6 +50,73 @@ function stage(opts: { items?: string[]; remindersEnabled?: boolean; linked?: bo
 }
 
 describe("runChecklistTick", () => {
+  it("шлёт карточку один раз и сохраняет отметку из неё без дубля журнала", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(`${TODAY}T08:05:00+03:00`));
+    try {
+      const { db, igor, list } = stage({ items: ["Свет", "Окна", "Двери", "Лифты"] });
+      const enabled = { ...config, checklistWidgetEnabled: true };
+      const bot = stubBotInfo(createBot({ db, config: enabled }));
+      const { calls } = recordApi(bot);
+      expect(await runChecklistTick(db, bot, enabled, { date: TODAY, time: "08:05" })).toBe(1);
+      expect(await runChecklistTick(db, bot, enabled, { date: TODAY, time: "08:10" })).toBe(0);
+      const outgoing = calls.filter(c => c.method === "sendWidget");
+      expect(outgoing).toHaveLength(1);
+      const state = JSON.parse(outgoing[0]!.payload.chat_data);
+      expect(outgoing[0]!.payload.caption).toContain("Свет");
+      const item = state.items[0][0];
+      const request = (data: string, id: number, chatId = 333) => bot.handleUpdate({
+        update_id: id,
+        widget_query: { id: String(id), type: { type: "data" }, chat: { id: chatId, type: "private" },
+          message_id: 5, from: { id: 333, is_bot: false, first_name: "Игорь" }, data },
+      } as never);
+      await request(state.scope + ":m" + item + ".1", 10, 444);
+      await request(state.scope.replace(TODAY, "2026-08-23") + ":m" + item + ".1", 11);
+      expect(listMarksFor(db, TODAY, igor.id)).toHaveLength(0);
+      await request(state.scope + ":p1", 15);
+      const page = JSON.parse(calls.filter(c => c.method === "answerWidgetQuery").at(-1)!.payload.data);
+      expect(page.items[0][1]).toBe("Лифты");
+      // Три отметки пришли через другой интерфейс, карточка должна их учесть.
+      for (const id of [state.items[1][0], state.items[2][0], page.items[0][0]]) {
+        setMark(db, { date: TODAY, employeeId: igor.id, itemId: id, done: true });
+      }
+      await request(state.scope + ":m" + item + ".1", 12);
+      await request(state.scope + ":m" + item + ".1", 13);
+      expect(listMarksFor(db, TODAY, igor.id)).toHaveLength(4);
+      expect(listRecentAudit(db, 10).filter(e => e.type === "checklist_completed")).toHaveLength(1);
+      const answer = calls.filter(c => c.method === "answerWidgetQuery").at(-1)!;
+      expect(JSON.parse(answer.payload.data)).toMatchObject({ done: 4, total: 4, name: list.name });
+      await request(state.scope + ":m" + item + ".0", 14);
+      expect(listMarksFor(db, TODAY, igor.id)).toHaveLength(3);
+      const disabledBot = stubBotInfo(createBot({ db, config }));
+      const disabled = recordApi(disabledBot);
+      await disabledBot.handleUpdate({
+        update_id: 16,
+        widget_query: { id: "16", type: { type: "data" }, chat: { id: 333, type: "private" },
+          message_id: 5, from: { id: 333, is_bot: false, first_name: "Игорь" }, data: state.scope + ":m" + item + ".1" },
+      } as never);
+      expect(JSON.parse(disabled.calls.find(c => c.method === "answerWidgetQuery")!.payload.data)).toMatchObject({ disabled: true });
+      expect(listMarksFor(db, TODAY, igor.id)).toHaveLength(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("при отказе формата сохраняет полный текст и отправляет инструкцию один раз", async () => {
+    const { db, list } = stage();
+    updateChecklist(db, list.id, { note: "Проверить до обеда", docFileId: "test-file" });
+    const enabled = { ...config, checklistWidgetEnabled: true };
+    const bot = stubBotInfo(createBot({ db, config: enabled }));
+    const { calls, sent } = recordApi(bot);
+    bot.api.config.use(async (prev, method, payload, signal) => String(method) === "sendWidget"
+      ? { ok: false, error_code: 400, description: "Format refused" } as never
+      : prev(method, payload, signal));
+    expect(await runChecklistTick(db, bot, enabled, { date: TODAY, time: "08:05" })).toBe(1);
+    expect(await runChecklistTick(db, bot, enabled, { date: TODAY, time: "08:10" })).toBe(0);
+    expect(calls.filter(c => c.method === "sendDocument")).toHaveLength(1);
+    expect(sent[0]!.text).toContain("Проверить до обеда");
+    expect(sent[0]!.text).toContain("Окна");
+  });
   // Решение владельца от 2026-09-28: дежурному на больничном чек-лист не нужен —
   // он не на этаже, а смена до решения по передаче всё ещё стоит на нём.
   it("дежурный на больничном сегодня — чек-лист не уходит", async () => {

@@ -9,6 +9,7 @@ import { getEmployeeById } from "../repo/employees";
 import { listShiftsOverlapping } from "../repo/shifts";
 import { listActiveTemplates } from "../repo/templates";
 import { addReminder, checklistDayKey, checklistDocKind, checklistKind, checklistUndeliverableKind, hasReminder } from "../repo/reminders";
+import { sendChecklistWidget } from "../bot/checklist-widget";
 import { isPermanentSendFailure } from "../bot/notify";
 import { safeErrorMessage } from "../util/safe-error";
 
@@ -172,7 +173,9 @@ export async function runChecklistTick(
       // Клавиатура прикладывается, только если в ней есть кнопки: пустой
       // `inline_keyboard` — это разметка ради разметки.
       const markup = kb.inline_keyboard.flat().length > 0 ? { reply_markup: kb } : undefined;
-      await bot.api.sendMessage(chatId, text, markup);
+      const widgetSent = config.checklistWidgetEnabled && items.length > 0 && owner.isActive
+        && await sendChecklistWidget(bot, db, config, chatId, { employeeId, checklistId, date: now.date }, kb, text);
+      if (!widgetSent) await bot.api.sendMessage(chatId, text, markup);
       addReminder(db, shift.id, checklistKind(checklistId, day));
       sent += 1;
     } catch (err) {

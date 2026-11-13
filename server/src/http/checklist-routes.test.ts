@@ -298,6 +298,7 @@ describe("чек-лист: свой (работник)", () => {
     expect(listRecentAudit(db, 10).map((e) => e.type)).toEqual([]);
 
     await app.request("/api/my/checklist/mark", authedJson(token, { date: TODAY, itemId: items[1].id, done: true }));
+    await app.request("/api/my/checklist/mark", authedJson(token, { date: TODAY, itemId: items[1].id, done: true }));
     const events = listRecentAudit(db, 10);
     expect(events.map((e) => e.type)).toEqual(["checklist_completed"]);
     expect(events[0]!.payload).toMatchObject({ employeeName: "Игорь", date: TODAY, checklistName: "С 07:00", total: 2 });

@@ -1,3 +1,4 @@
+import { checklistByTemplate, checklistsFor, markChecklistItem } from "../../checklists/mark";
 import { Hono } from "hono";
 import { z } from "zod";
 import {
@@ -7,10 +8,7 @@ import {
   CHECKLIST_NOTE_MAX,
   checklistDelivery,
   checklistHasContent,
-  checklistsDueToday,
   dateStr,
-  isChecklistComplete,
-  prevDate,
 } from "@planer/shared";
 import type { Config } from "../../config";
 import type { Db } from "../../db/client";
@@ -22,11 +20,9 @@ import {
   listMarksFor,
   listMarksOnDate,
   reorderChecklistItem,
-  setMark,
   updateChecklistItem,
 } from "../../repo/checklist";
 import {
-  checklistIdsByTemplate,
   createChecklist,
   deleteChecklist,
   getChecklist,
@@ -43,27 +39,6 @@ import { checklistDayKey, checklistKind, reminderSentAt } from "../../repo/remin
 import { teamNow, teamTimeAt } from "../../util/team-time";
 import { requireAdmin, requireAuth, type Env } from "../middleware";
 import { MAX_DOC_BYTES, removeChecklistDoc, safeDocName, writeChecklistDoc } from "../checklist-doc";
-
-/**
- * Какие чек-листы у какого вида смены — карта, которой отвечает `checklistsDueToday`.
- *
- * Только активные виды смен: смен погашенного пресета не ставят, а его связи
- * пережили бы его в таблице и приносили бы списки задним числом.
- */
-export function checklistByTemplate(db: Db): Map<number, number[]> {
-  const active = new Set(listActiveTemplates(db).map((t) => t.id));
-  return new Map([...checklistIdsByTemplate(db)].filter(([templateId]) => active.has(templateId)));
-}
-
-/**
- * Какие чек-листы человек проходит в этот день.
- *
- * `listShiftsOverlapping`, а не `listShiftsInRange`: многодневная запись,
- * начавшаяся раньше, второй не видна вовсе.
- */
-export function checklistsFor(db: Db, date: string, employeeId: number): number[] {
-  return checklistsDueToday(listShiftsOverlapping(db, date, date), checklistByTemplate(db), date, employeeId);
-}
 
 const nameSchema = z.object({ name: z.string().trim().min(1).max(CHECKLIST_NAME_MAX) });
 const titleSchema = z.object({ title: z.string().trim().min(1).max(CHECKLIST_ITEM_TITLE_MAX) });
@@ -339,39 +314,8 @@ export function createChecklistRoutes(db: Db, config: Config) {
       .safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) return c.json({ error: "invalid", issues: parsed.error.issues }, 400);
     const employeeId = c.get("auth").employeeId;
-    const { date, itemId, done } = parsed.data;
-    // Только сегодня и вчера по командной дате (его решение от 2026-09-28):
-    // отметка ставилась на любую дату — заранее на завтра или задним числом
-    // на прошлую неделю. Вчера — ради ночной смены через полночь.
-    const today = teamNow(config.teamTz).date;
-    if (date !== today && date !== prevDate(today)) {
-      return c.json({ error: "Отмечать можно только сегодняшний и вчерашний чек-лист" }, 400);
-    }
-
-    const item = getChecklistItem(db, itemId);
-    if (!item?.checklistId || !item.isActive) return c.json({ error: "unknown_item" }, 400);
-    // Отметить можно только пункт СВОЕГО сегодняшнего чек-листа: иначе дежурный
-    // с восьми закрывал бы проверки того, кто выходит в семь.
-    if (!checklistsFor(db, date, employeeId).includes(item.checklistId)) return c.json({ error: "not_your_day" }, 400);
-
-    setMark(db, { date, employeeId, itemId, done });
-    const items = activeChecklistItems(db, item.checklistId);
-    const markedItemIds = listMarksFor(db, date, employeeId)
-      .map((m) => m.itemId)
-      .filter((id) => items.some((i) => i.id === id));
-
-    // Строка журнала — на переход в «пройден», а не на каждый тап.
-    if (done && isChecklistComplete(items, markedItemIds)) {
-      recordAudit(db, "checklist_completed", employeeId, {
-        employeeId,
-        employeeName: getEmployeeById(db, employeeId)?.displayName ?? null,
-        date,
-        checklistName: getChecklist(db, item.checklistId)?.name ?? null,
-        total: items.length,
-      });
-    }
-
-    return c.json({ checklistId: item.checklistId, markedItemIds });
+    const result = markChecklistItem(db, { ...parsed.data, employeeId }, teamNow(config.teamTz).date);
+    return "error" in result ? c.json(result, 400) : c.json(result);
   });
 
   return app;

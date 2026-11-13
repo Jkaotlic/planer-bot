@@ -35,6 +35,7 @@ import { addressOf, parseSavedQrStyle, addDaysIso, mondayOfIso, ADMIN_NOTICE_KIN
 import { buildWeekImage, type WeekImage } from "./week-image";
 import { buildQrImage } from "./qr-image";
 import { mainKeyboard, BTN_WEEK, BTN_MY_SHIFTS, BTN_MY_WEEK, BTN_SERVICES, LEGACY_BTN_FOOD, BTN_REMINDERS, BTN_ADMIN, BTN_BUG } from "./keyboard";
+import { installChecklistWidget } from "./checklist-widget";
 import { installMyWeekWidget } from "./my-week-widget";
 import { installFoodHandlers } from "./food-handlers";
 import {
@@ -397,6 +398,7 @@ export function createBot(deps: BotDeps): Bot {
   // сейчас — поэтому вызов обязан стоять выше catch-all
   // `bot.on("callback_query:data", …)` в конце файла, иначе тот перехватит их первым.
   const food = installFoodHandlers(bot, { db, config, acting, actsAsAdmin });
+  installChecklistWidget(bot, db, config);
   const myWeek = installMyWeekWidget(bot, { db, config, acting, openMiniApp: sendMiniApp });
   bot.command("myweek", ctx => myWeek.send(ctx));
 
