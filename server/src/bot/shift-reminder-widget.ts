@@ -20,15 +20,20 @@ export function shiftReminderWidget(text: string, shift: ShiftReminderDetails): 
   return {
     caption,
     html: `<style>
-body{margin:0;padding:12px;font-family:system-ui;color:var(--tg-theme-text-color)}
-h3,p{margin:0}h3{font-size:1.15em}strong{display:block;font-size:1.35em;margin:5px 0 10px}
-.date{color:var(--tg-theme-hint-color);font-size:.85em}
-.location{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+body{margin:0;padding:14px;font-family:system-ui;color:var(--tg-theme-text-color)}
+h3,p{margin:0}
+.heading{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:3px 10px}
+h3{font-size:.92em;font-weight:600}
+.date{color:var(--tg-theme-hint-color);font-size:.85em;white-space:nowrap}
+.time{display:block;margin-top:7px;font-size:1.55em;line-height:1.15;white-space:nowrap}
+.location{margin-top:11px;padding-top:8px;border-top:1px solid var(--tg-theme-section-separator-color,var(--tg-theme-hint-color));font-size:.9em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 </style>
 <section>
-  <p class="date">${escapeText(formatDayMonth(shift.date))}</p>
-  <h3>Завтра смена</h3>
-  <strong>${escapeText(shift.timeRange)}</strong>
+  <div class="heading">
+    <h3>Завтра смена</h3>
+    <p class="date">${escapeText(formatDayMonth(shift.date))}</p>
+  </div>
+  <strong class="time">${escapeText(shift.timeRange)}</strong>
   ${location ? `<p class="location">${escapeText(location)}</p>` : ""}
 </section>`,
   };
