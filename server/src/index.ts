@@ -65,7 +65,7 @@ const fetchHolidays = xmlcalendarFetcher();
 // У каждого тика свой флаг «идёт» (`createTickScheduler`): медленный пропускает
 // свои круги сам, а не держит соседей.
 const tickRound = createTickScheduler([
-    { name: "reminder", run: () => runReminderTick(db, bot, teamNow(config.teamTz), config.publicUrl) },
+    { name: "reminder", run: () => runReminderTick(db, bot, teamNow(config.teamTz), config.publicUrl, config.shiftReminderWidgetEnabled) },
     // В тот же массив: чек-лист уходит с началом смены дежурного, а не по
     // общему часу, поэтому ему нужен тот же пятиминутный тик.
     { name: "checklist", run: () => runChecklistTick(db, bot, config, teamNow(config.teamTz)) },

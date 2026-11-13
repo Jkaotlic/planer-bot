@@ -53,6 +53,39 @@ const TODAY = "2026-07-14";
 const TOMORROW = "2026-07-15";
 
 describe("runReminderTick", () => {
+  it.each([200, 400, 404, 403, 429, 500])("доставляет карточку или сохраняет контракт доставки при коде %s", async (code) => {
+    const db = makeTestDb();
+    const anya = linkedEmployee(db, "Аня", 111);
+    const shift = createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: anya.id, location: "<Офис>" });
+    const bot = stubBotInfo(new Bot("12345:tok"));
+    const calls: { method: string; payload: unknown }[] = [];
+    bot.api.config.use(async (_prev, method, payload) => {
+      calls.push({ method, payload });
+      return (String(method) === "sendWidget" && code !== 200
+        ? { ok: false, error_code: code, description: "Telegram refusal" }
+        : { ok: true, result: { message_id: 10 } }) as never;
+    });
+    const count = await runReminderTick(db, bot, { date: TODAY, time: "20:30" }, "https://example.com", true);
+    const fallback = code === 400 || code === 404;
+    expect(calls.map(c => c.method)).toEqual(fallback ? ["sendWidget", "sendMessage"] : ["sendWidget"]);
+    expect(calls[0]?.payload).toMatchObject({ chat_id: 111, caption: expect.stringContaining("08:00–17:00"), html: expect.stringContaining("&lt;Офис&gt;") });
+    expect(JSON.stringify(calls[0]?.payload)).toContain("reminders:off");
+    expect(count).toBe(code === 200 || fallback ? 1 : 0);
+    expect(hasEveningReminder(db, shift.id, anya.id)).toBe(code === 200 || fallback || code === 403);
+    if (code === 200) {
+      await runReminderTick(db, bot, { date: TODAY, time: "20:35" }, "https://example.com", true);
+      expect(calls).toHaveLength(1);
+    }
+  });
+
+  it.each(["catch-up", "long"])("оставляет обычное сообщение для %s", async (mode) => {
+    const db = makeTestDb();
+    const anya = linkedEmployee(db, "Аня", 111);
+    createShift(db, { date: mode === "catch-up" ? TODAY : TOMORROW, start: "08:00", end: "17:00", employeeId: anya.id, location: mode === "long" ? "Я".repeat(1100) : null });
+    const { bot, sent } = testBot();
+    expect(await runReminderTick(db, bot, { date: TODAY, time: mode === "catch-up" ? "07:00" : "20:30" }, "https://example.com", true)).toBe(1);
+    expect(sent).toHaveLength(1);
+  });
   it("sends an evening-before reminder for a morning shift tomorrow", async () => {
     const db = makeTestDb();
     const anya = linkedEmployee(db, "Аня", 111);

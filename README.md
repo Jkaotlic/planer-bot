@@ -109,6 +109,7 @@ node --import tsx --env-file=server/.env server/src/index.ts
 | `PORT` | нет | HTTP-порт, по умолчанию `8080` — смените, если порт занят |
 | `BOT_USERNAME` | нет | username бота без `@` |
 | `MY_WEEK_WIDGET_ENABLED` | нет | `true` включает личный виджет недели, `false` выключает; по умолчанию `false` |
+| `SHIFT_REMINDER_WIDGET_ENABLED` | нет | `true` включает карточки вечерних напоминаний, `false` возвращает текст после перезапуска; по умолчанию `false` |
 
 Интерфейсы собираются с двумя необязательными переменными сборки:
 

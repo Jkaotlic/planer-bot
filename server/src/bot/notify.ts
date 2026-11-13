@@ -6,6 +6,7 @@ import { safeErrorMessage } from "../util/safe-error";
 import type { SwapAuditPayload } from "../util/message-lines";
 import type { OutsidePoolFact } from "../swap/duty-notice";
 import { takesPartInAssignment, type AdminNoticeKind } from "@planer/shared";
+import { shiftReminderWidget, type ShiftReminderDetails } from "./shift-reminder-widget";
 
 // --- Swap text builders ------------------------------------------------------
 //
@@ -234,7 +235,7 @@ export function isPermanentSendFailure(err: unknown): boolean {
  * they didn't know existed — the moment somebody wants these to stop is the
  * moment one is in front of them, so that is where the button belongs.
  */
-export async function notifyReminder(bot: Bot, telegramUserId: number, text: string, appUrl?: string): Promise<SendOutcome> {
+export async function notifyReminder(bot: Bot, telegramUserId: number, text: string, appUrl?: string, shift?: ShiftReminderDetails): Promise<SendOutcome> {
   const kb = new InlineKeyboard();
   // Вечер накануне — момент, когда человек понимает, что выйти не может. Под
   // рукой должно быть действие, а не только «замолчи». Инлайн-`web_app`, не
@@ -242,6 +243,22 @@ export async function notifyReminder(bot: Bot, telegramUserId: number, text: str
   if (appUrl) kb.webApp("📋 Мои смены", appUrl).row();
   kb.text("🔕 Отключить напоминания", "reminders:off");
   try {
+    const widget = shift && shiftReminderWidget(text, shift);
+    if (widget) {
+      // grammY 1.44 не описывает sendWidget, но raw использует обычный транспорт.
+      const api = bot.api.raw as unknown as {
+        sendWidget(payload: { chat_id: number; html: string; caption: string; reply_markup: InlineKeyboard }): Promise<unknown>;
+      };
+      try {
+        await api.sendWidget({ chat_id: telegramUserId, ...widget, reply_markup: kb });
+        return { ok: true };
+      } catch (err) {
+        // Явный отказ запроса позволяет перейти на текст. После сетевой
+        // ошибки исход отправки неизвестен, поэтому второй вызов здесь лишний.
+        if (!(err instanceof GrammyError && (err.error_code === 400 || err.error_code === 404))) throw err;
+        console.warn("notifyReminder: widget refused, using text:", err.error_code);
+      }
+    }
     await bot.api.sendMessage(telegramUserId, text, { reply_markup: kb });
     return { ok: true };
   } catch (err) {

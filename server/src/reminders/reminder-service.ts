@@ -96,7 +96,7 @@ function remindableOn(db: Db, date: string): Shift[] {
  * Пометка у обеих веток одна, `evening_before:<id>`, так что дубля не бывает.
  * Returns the number sent.
  */
-export async function runReminderTick(db: Db, bot: Bot, now: { date: string; time: string }, publicUrl?: string): Promise<number> {
+export async function runReminderTick(db: Db, bot: Bot, now: { date: string; time: string }, publicUrl?: string, widgetEnabled = false): Promise<number> {
   let count = await catchUpPass(db, bot, now, publicUrl);
   // Час — настройка админа, а не константа. Строки нет — те же 20:00, что и до неё.
   if (now.time < reminderHour(db)) return count;
@@ -106,7 +106,7 @@ export async function runReminderTick(db: Db, bot: Bot, now: { date: string; tim
   const before = count;
   for (const shift of shifts) {
     try {
-      count += await remindFor(db, bot, shift, publicUrl, "evening");
+      count += await remindFor(db, bot, shift, publicUrl, "evening", widgetEnabled);
     } catch (err) {
       // The list of shifts was read once, up front, and each send below awaits
       // Telegram — an admin deleting tomorrow's shift in that gap leaves the
@@ -225,7 +225,7 @@ function runOf(db: Db, shift: Shift, template: ShiftTemplate | undefined) {
 }
 
 /** One shift's reminder. Returns 1 if it went out, 0 otherwise. */
-async function remindFor(db: Db, bot: Bot, shift: Shift, publicUrl: string | undefined, mode: "evening" | "catchUp"): Promise<number> {
+async function remindFor(db: Db, bot: Bot, shift: Shift, publicUrl: string | undefined, mode: "evening" | "catchUp", widgetEnabled = false): Promise<number> {
     if (hasEveningReminder(db, shift.id, shift.employeeId!)) return 0;
     const owner = getEmployeeById(db, shift.employeeId!);
     if (!owner || !owner.remindersEnabled || owner.telegramUserId == null) return 0;
@@ -282,7 +282,8 @@ async function remindFor(db: Db, bot: Bot, shift: Shift, publicUrl: string | und
       : buildReminderText({ name, kind, timeRange, what, until, location, coworkers, eveningCoworkers });
 
     const appUrl = publicUrl ? `${publicUrl}/app/` : undefined;
-    const outcome = await notifyReminder(bot, owner.telegramUserId, text, appUrl);
+    const widget = widgetEnabled && mode === "evening" ? { date: shift.date, start, timeRange, location } : undefined;
+    const outcome = await notifyReminder(bot, owner.telegramUserId, text, appUrl, widget);
     if (outcome.ok) {
       addReminder(db, shift.id, eveningReminderKind(owner.id));
       return 1;
