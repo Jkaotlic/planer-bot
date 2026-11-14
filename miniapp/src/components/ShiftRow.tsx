@@ -130,8 +130,8 @@ function TodayChip() {
         letterSpacing: 0.2,
         borderRadius: 999,
         padding: "2px 8px",
-        color: "var(--tgui--button_text_color)",
-        background: "var(--tgui--link_color)",
+        color: "#fff",
+        background: "var(--app-action-background)",
         whiteSpace: "nowrap",
       }}
     >
@@ -180,7 +180,7 @@ function SwapChip({ onClick, blockedReason }: SwapChipProps) {
       <span
         style={{
           fontSize: 11,
-          color: "var(--tgui--hint_color)",
+          color: "var(--app-quiet-text)",
           textAlign: "right",
           maxWidth: 130,
           lineHeight: 1.3,

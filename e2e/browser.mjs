@@ -147,9 +147,9 @@ const crash = (page) =>
   });
 export async function browserScenarios() {
   const browser = await chromium.launch();
-  const mob = async () => {
+  const mob = async (width = 390) => {
     const c = await browser.newContext({
-      viewport: { width: 390, height: 844 },
+      viewport: { width, height: 844 },
       deviceScaleFactor: 2,
       hasTouch: true,
       isMobile: true,
@@ -217,6 +217,42 @@ export async function browserScenarios() {
     THEME = LIGHT;
     assert(!issues.length, issues.join(" ;; "));
     return out.join(", ");
+  });
+  await check("мини-апп на 320px: приветствие и сводка читаемы в обеих темах", async () => {
+    const ctx = await mob(320);
+    try {
+      const page = await ctx.newPage();
+      for (const palette of [LIGHT, DARK]) {
+        THEME = palette;
+        await page.goto(miniUrl(W1));
+        const greeting = page.getByText(/^Привет,/);
+        const services = page.getByRole("button", { name: "Сервисы" });
+        await services.waitFor();
+        const metrics = await greeting.evaluate(el => {
+          const lum = (value) => {
+            const [r, g, b] = value.match(/[\d.]+/g).map(Number).map(channel => {
+              const v = channel / 255;
+              return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+            });
+            return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+          };
+          let surface = el;
+          while (getComputedStyle(surface).backgroundColor === "rgba(0, 0, 0, 0)") surface = surface.parentElement;
+          const bg = lum(getComputedStyle(surface).backgroundColor);
+          const copy = [el, el.nextElementSibling].map(node => {
+            const fg = lum(getComputedStyle(node).color);
+            return (Math.max(fg, bg) + 0.05) / (Math.min(fg, bg) + 0.05);
+          });
+          return { width: el.clientWidth, contrast: Math.min(...copy) };
+        });
+        const caption = await services.boundingBox();
+        const title = await greeting.boundingBox();
+        assert(metrics.width >= 200 && caption.y >= title.y + title.height && metrics.contrast >= 4.5, JSON.stringify(metrics));
+      }
+    } finally {
+      THEME = LIGHT;
+      await ctx.close();
+    }
   });
   await check("СТАРЫЙ клиент Telegram (initData без signature), светлая тема: экраны читаемы", async () => {
     SIGN = false;
@@ -366,6 +402,34 @@ export async function browserScenarios() {
     assert(/Настя Экранная/.test(t), "нет на экране");
     assert(/t\.me\/e2e_test_bot\?start=/.test(inv), "нет ссылки: " + inv);
   });
+  await check("веб-консоль, работники: компактные карточки на телефоне, действия на десктопе", async () => {
+    const ctx = await mob(320);
+    try {
+      const page = await ctx.newPage();
+      await page.goto(state.adminLink);
+      await page.getByRole("button", { name: "Меню", exact: true }).click();
+      await page.getByRole("button", { name: "Работники", exact: true }).click();
+      const card = page.locator(".employee-row-card").filter({ hasText: "Настя Экранная" });
+      const details = card.getByRole("button", { name: /Настройки.*Настя Экранная/ });
+      await card.getByText("не привязан", { exact: true }).waitFor();
+      assert(await details.count() === 1, "нет кнопки настроек работника");
+      const archive = card.getByRole("button", { name: "Архивировать", exact: true });
+      assert(!(await archive.isVisible()), "архивирование видно в компактной строке");
+      await details.focus();
+      await page.keyboard.press("Enter");
+      await archive.waitFor();
+      await card.getByRole("button", { name: /Ограничения/ }).click();
+      await card.getByRole("checkbox", { name: /Не участвует в обменах/ }).waitFor();
+      const layout = await overflow(page);
+      assert(layout.sw === layout.w, JSON.stringify(layout));
+      await details.click();
+      assert(!(await archive.isVisible()), "карточка не свернулась");
+      const desktop = state.pageAdmin.locator(".employee-row-card").filter({ hasText: "Настя Экранная" });
+      assert(await desktop.getByRole("button", { name: "Архивировать", exact: true }).isVisible(), "на десктопе пропал прямой доступ к действию");
+    } finally {
+      await ctx.close();
+    }
+  });
   await check(
     "UI: работник — больничный кнопками; у админа появляется на подтверждении в консоли",
     async () => {
@@ -484,6 +548,38 @@ export async function browserScenarios() {
     await page.screenshot({ path: resolve(shots, "console-mobile.png") });
     await ctx.close();
     assert(o.sw <= o.w + 1, JSON.stringify(o));
+  });
+  await check("веб-консоль на телефоне: меню достижимо клавишей Tab и возвращает фокус", async () => {
+    const ctx = await mob();
+    try {
+      const page = await ctx.newPage();
+      await page.goto(state.adminLink);
+      const menu = page.getByRole("button", { name: "Меню", exact: true });
+      await menu.waitFor();
+      await page.keyboard.press("Tab");
+      assert(await menu.evaluate(el => el === document.activeElement), "первый Tab ушёл в закрытую шторку");
+      await page.keyboard.press("Enter");
+      const active = page.getByRole("button", { name: /^Расписание/ });
+      await page.waitForFunction(() => document.activeElement?.classList.contains("sidebar-nav-item"));
+      assert(await active.evaluate(el => el === document.activeElement), "открытая шторка не получила фокус");
+      await page.keyboard.press("Shift+Tab");
+      const last = page.locator(".sidebar-nav-item").last();
+      assert(await last.evaluate(el => el === document.activeElement), "Shift+Tab ушёл за пределы шторки");
+      await page.keyboard.press("Tab");
+      assert(await active.evaluate(el => el === document.activeElement), "Tab ушёл за пределы шторки");
+      await page.keyboard.press("Escape");
+      assert(await menu.evaluate(el => el === document.activeElement), "Esc не вернул фокус кнопке меню");
+
+      await page.route("**/api/admin/shortfall", route => route.fulfill({ status: 401, json: { error: "Сессия истекла" } }));
+      await page.keyboard.press("Enter");
+      await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+      const login = page.getByRole("link", { name: "Открыть бота" });
+      await login.waitFor();
+      await page.keyboard.press("Tab");
+      assert(await login.evaluate(el => el === document.activeElement), "закрытая шторка перехватила Tab на экране входа");
+    } finally {
+      await ctx.close();
+    }
   });
   await check("истёкший токен консоли: уводит на вход, без белого экрана", async () => {
     const ctx = await browser.newContext();

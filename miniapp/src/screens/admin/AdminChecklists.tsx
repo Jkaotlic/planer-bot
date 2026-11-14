@@ -178,7 +178,7 @@ function DaySummary({ day }: { day: ChecklistDay | null }) {
       </div>
 
       {people.length === 0 ? (
-        <span style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)" }}>Сегодня чек-лист никому не положен.</span>
+        <span style={{ fontSize: "var(--app-text-meta)", color: "var(--app-quiet-text)" }}>Сегодня чек-лист никому не положен.</span>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {people.map((p) => (
@@ -191,7 +191,7 @@ function DaySummary({ day }: { day: ChecklistDay | null }) {
                   color: p.delivery === "sent"
                     ? "var(--tgui--text_color)"
                     : p.delivery === "scheduled"
-                      ? "var(--tgui--hint_color)"
+                      ? "var(--app-quiet-text)"
                       : "var(--tgui--destructive_text_color)",
                 }}
               >
@@ -263,9 +263,9 @@ function ChecklistCard({
           <span className="checklist-badge" style={{ flex: "none" }}>
             <StatusPill tone={dispatch === "sends" ? "ok" : "bad"}>{checklistDispatchBadge(dispatch)}</StatusPill>
           </span>
-          <span aria-hidden="true" style={{ marginLeft: "auto", color: "var(--tgui--hint_color)" }}>{open ? "▴" : "▾"}</span>
+          <span aria-hidden="true" style={{ marginLeft: "auto", color: "var(--app-quiet-text)" }}>{open ? "▴" : "▾"}</span>
         </span>
-        <span style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)", lineHeight: 1.4 }}>
+        <span style={{ fontSize: "var(--app-text-meta)", color: "var(--app-quiet-text)", lineHeight: 1.4 }}>
           {list.items.length === 0 ? "пунктов нет" : `${list.items.length} п.`}
           {" · "}
           {checklistDispatchReason(dispatch, linked.map((t) => t.name))}
@@ -276,7 +276,7 @@ function ChecklistCard({
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 10 }}>
           {/* «Кому положен» первым: это и есть тот «скоп смен», ради которого
               списков стало несколько. */}
-          <span style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)" }}>Кому положен</span>
+          <span style={{ fontSize: "var(--app-text-meta)", color: "var(--app-quiet-text)" }}>Кому положен</span>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
             {templates.map((template) => {
               const on = list.templateIds.includes(template.id);
@@ -307,9 +307,9 @@ function ChecklistCard({
 
           {/* Сегодняшний расклад рядом с настройкой: «уйдёт ли» проверяют
               ровно в тот момент, когда виды смен только что переключили. */}
-          <span style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)" }}>Сегодня</span>
+          <span style={{ fontSize: "var(--app-text-meta)", color: "var(--app-quiet-text)" }}>Сегодня</span>
           {todayPeople.length === 0 ? (
-            <span style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)" }}>Сегодня этот чек-лист никому не положен.</span>
+            <span style={{ fontSize: "var(--app-text-meta)", color: "var(--app-quiet-text)" }}>Сегодня этот чек-лист никому не положен.</span>
           ) : (
             todayPeople.map((p) => (
               <div key={p.employeeId} style={{ display: "flex", alignItems: "baseline", gap: 8, fontSize: "var(--app-text-meta)" }}>
@@ -317,16 +317,16 @@ function ChecklistCard({
                 {/* Судьба сообщения рядом с прогрессом: «0 из 5» у того, кому
                     ничего не ушло, читается как лень человека, а не как
                     выключенные напоминания. */}
-                <span style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)" }}>
+                <span style={{ fontSize: "var(--app-text-meta)", color: "var(--app-quiet-text)" }}>
                   {checklistDeliveryLabel(p.delivery, p.start, p.sentAt)} · {p.done} из {p.total}
                 </span>
               </div>
             ))
           )}
 
-          <span style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)" }}>Пункты</span>
+          <span style={{ fontSize: "var(--app-text-meta)", color: "var(--app-quiet-text)" }}>Пункты</span>
           {list.items.length === 0 ? (
-            <span style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)" }}>Пунктов пока нет.</span>
+            <span style={{ fontSize: "var(--app-text-meta)", color: "var(--app-quiet-text)" }}>Пунктов пока нет.</span>
           ) : (
             list.items.map((item, index) => (
               <ItemRow
@@ -393,10 +393,10 @@ function ChecklistCard({
               Не сохранено — нажми «Сохранить инструкцию».
             </span>
           ) : (
-            saved && <span style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)" }}>Сохранено.</span>
+            saved && <span style={{ fontSize: "var(--app-text-meta)", color: "var(--app-quiet-text)" }}>Сохранено.</span>
           )}
 
-          <span style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)", lineHeight: 1.45 }}>
+          <span style={{ fontSize: "var(--app-text-meta)", color: "var(--app-quiet-text)", lineHeight: 1.45 }}>
             {list.hasDoc
               ? `📄 Приложен файл: ${list.docName} — уходит дежурному вместе с чек-листом.`
               : "Файл не приложен."}
@@ -420,7 +420,7 @@ function ChecklistCard({
           <ActionButton disabled={busy} onClick={() => fileInput.current?.click()}>
             {list.hasDoc ? "📎 Заменить файл" : "📎 Приложить файл"}
           </ActionButton>
-          <span style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)", lineHeight: 1.4 }}>
+          <span style={{ fontSize: "var(--app-text-meta)", color: "var(--app-quiet-text)", lineHeight: 1.4 }}>
             До 5 МБ. Можно и прислать боту: /instruction, потом выбрать «{list.name}».
           </span>
           {list.hasDoc && (
@@ -519,13 +519,13 @@ function ItemRow({
 
   return (
     <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
-      <span style={{ fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)", minWidth: 16 }}>{index + 1}</span>
+      <span style={{ fontSize: "var(--app-text-meta)", color: "var(--app-quiet-text)", minWidth: 16 }}>{index + 1}</span>
       {/* Базис 140px: на узком экране кнопки уходят строкой ниже, а не
           сжимают название до пары букв. */}
       <span style={{ flex: "1 1 140px", fontSize: "var(--app-text-body)", minWidth: 0, overflowWrap: "anywhere" }}>
         {item.title}
         {item.note && (
-          <span style={{ display: "block", fontSize: "var(--app-text-meta)", color: "var(--tgui--hint_color)" }}>{item.note}</span>
+          <span style={{ display: "block", fontSize: "var(--app-text-meta)", color: "var(--app-quiet-text)" }}>{item.note}</span>
         )}
       </span>
       <span style={{ display: "inline-flex", gap: 2, marginLeft: "auto", flex: "none" }}>

@@ -66,7 +66,7 @@ describe("MyShiftsScreen", () => {
     const text = await renderScreen([
       entry("2026-08-06", "День"), entry("2026-08-11", "Утро"), entry("2026-08-12", "Утро"),
     ]);
-    expect(text).toContain("Осталось на этой неделе — 1 смена · 9 ч");
+    expect(text).toContain("Осталось на этой неделе — 1 смена · 9\u00a0ч");
   });
 
   it("прошедшую запись не рисует вовсе", async () => {

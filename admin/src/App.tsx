@@ -98,6 +98,7 @@ export function rosterImportBlocker(state: Pick<RosterImportState, "preview" | "
 export function App() {
   const [nav, setNav] = useState<NavKey>("schedule");
   const [menuOpen, setMenuOpen] = useState(false);
+  const menuButton = useRef<HTMLButtonElement>(null);
   const [weekMonday, setWeekMonday] = useState(() => mondayOf(new Date()));
   const [employees, setEmployees] = useState<Employee[] | null>(null);
   const [templates, setTemplates] = useState<Template[] | null>(null);
@@ -192,16 +193,42 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Esc закрывает шторку. Слушаем `document`, а не саму шторку: в момент
-  // нажатия фокус может быть где угодно — хоть в поле поиска под затемнением.
+  function closeMobileMenu() {
+    setMenuOpen(false);
+    menuButton.current?.focus();
+  }
+
   useEffect(() => {
-    if (!menuOpen) return;
+    if (!menuOpen || needLogin) return;
+    const mobile = window.matchMedia?.("(max-width: 900px)");
+    if (mobile && !mobile.matches) {
+      setMenuOpen(false);
+      return;
+    }
+    const sidebar = document.getElementById("admin-sidebar");
+    const items = sidebar?.querySelectorAll<HTMLButtonElement>("nav button");
+    sidebar?.querySelector<HTMLButtonElement>("button[aria-current=page]")?.focus();
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setMenuOpen(false);
+      if (event.key === "Escape") closeMobileMenu();
+      if (event.key !== "Tab" || !items?.length) return;
+      const first = items[0]!;
+      const last = items[items.length - 1]!;
+      const edge = event.shiftKey ? first : last;
+      if (document.activeElement === edge || !sidebar?.contains(document.activeElement)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+      }
     };
+    const onResize = (event: MediaQueryListEvent) => {
+      if (!event.matches) setMenuOpen(false);
+    };
+    mobile?.addEventListener?.("change", onResize);
     document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [menuOpen]);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      mobile?.removeEventListener?.("change", onResize);
+    };
+  }, [menuOpen, needLogin]);
 
   async function loadBootstrap(cancelled: () => boolean = () => false) {
     setBootError(null);
@@ -592,7 +619,7 @@ export function App() {
           setNav(key);
           // Закрываем сразу: иначе шторка остаётся поверх экрана, ради которого
           // её и открывали.
-          setMenuOpen(false);
+          if (menuOpen) closeMobileMenu();
         }}
         adminLabel={viewer ? `${viewer.address} · админ` : "Админ"}
         open={menuOpen}
@@ -602,7 +629,7 @@ export function App() {
         }}
       />
       {menuOpen && (
-        <button type="button" className="sidebar-scrim" aria-label="Закрыть меню" onClick={() => setMenuOpen(false)} />
+        <button type="button" className="sidebar-scrim" aria-label="Закрыть меню" tabIndex={-1} onClick={closeMobileMenu} />
       )}
       <div className="main-column">
         {/* Шапка узкого режима: на телефоне сайдбар спрятан, и без неё нет ни
@@ -613,8 +640,10 @@ export function App() {
           <button
             type="button"
             className="mobile-menu-btn"
+            ref={menuButton}
             aria-label="Меню"
             aria-expanded={menuOpen}
+            aria-controls="admin-sidebar"
             onClick={() => setMenuOpen((v) => !v)}
           >
             <span />

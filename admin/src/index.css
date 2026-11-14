@@ -795,6 +795,16 @@ button {
   border: 1px solid var(--separator);
 }
 
+.employee-summary,
+.employee-summary-status,
+.employee-details {
+  display: contents;
+}
+
+.employee-details-toggle {
+  display: none;
+}
+
 .employee-row-name {
   font-size: var(--text-body);
   font-weight: 600;
@@ -3280,7 +3290,8 @@ textarea {
    для телефона не заводим: два близких брейкпоинта расходятся при первой же
    правке, и потом никто не помнит, какой из них главный. */
 
-.mobile-topbar {
+.mobile-topbar,
+.sidebar-scrim {
   display: none;
 }
 
@@ -3338,16 +3349,19 @@ textarea {
     flex: none;
     overflow-y: auto;
     transform: translateX(-100%);
+    visibility: hidden;
     transition: transform 0.18s ease-out;
     padding-top: max(20px, env(safe-area-inset-top));
   }
 
   .sidebar.open {
     transform: translateX(0);
+    visibility: visible;
     box-shadow: 0 0 40px rgba(0, 0, 0, 0.35);
   }
 
   .sidebar-scrim {
+    display: block;
     position: fixed;
     inset: 0;
     z-index: 25;
@@ -3551,6 +3565,67 @@ textarea {
     flex-wrap: wrap;
     align-items: flex-start;
     gap: 10px;
+  }
+
+  .employee-summary {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) 44px;
+    align-items: center;
+    column-gap: 8px;
+    row-gap: 4px;
+    width: 100%;
+  }
+
+  .employee-summary .employee-row-name {
+    max-width: none;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .employee-summary-status {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    grid-column: 2;
+  }
+
+  .employee-summary-status .status-chip {
+    white-space: normal;
+  }
+
+  .employee-details-toggle {
+    display: grid;
+    grid-column: 3;
+    grid-row: 1 / span 2;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    border: 0;
+    border-radius: var(--radius-control);
+    background: var(--surface-secondary);
+    color: var(--text);
+    font: inherit;
+    font-size: var(--text-title);
+    cursor: pointer;
+  }
+
+  .employee-details-toggle[aria-expanded="true"] span {
+    transform: rotate(180deg);
+  }
+
+  .employee-details {
+    display: none;
+  }
+
+  .employee-details[data-open="true"] {
+    display: flex;
+    flex: 1 1 100%;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    min-width: 0;
+    padding-top: 10px;
+    border-top: 1px solid var(--separator);
   }
 
   /* Строка желающего — «аватар · имя · метка справедливости · сколько раз за

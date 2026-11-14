@@ -102,7 +102,7 @@ export function MyShiftsScreen({
   const rest = remainingThisWeek(shifts, today);
   const summary =
     rest.count > 0
-      ? `Осталось на этой неделе — ${rest.count} ${pluralizeRu(rest.count, "смена", "смены", "смен")} · ${Math.round(rest.hours)} ч`
+      ? `Осталось на этой неделе — ${rest.count} ${pluralizeRu(rest.count, "смена", "смены", "смен")} · ${Math.round(rest.hours)}\u00a0ч`
       : "На этой неделе смен больше нет";
   // Считаем один раз на весь экран и раздаём каждой строке. Порядок причин не
   // переписан руками — он приходит от той же функции, что решает на сервере,

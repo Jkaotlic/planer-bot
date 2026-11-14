@@ -15,7 +15,7 @@
   min-height: var(--app-tap);
   border: 0;
   border-radius: calc(var(--app-radius-control) - 3px);
-  color: var(--tgui--hint_color);
+  color: var(--app-quiet-text);
   background: transparent;
   font: inherit;
 }
@@ -197,7 +197,7 @@
   min-width: 0;
   padding: 6px 1px;
   text-align: center;
-  color: var(--tgui--hint_color);
+  color: var(--app-quiet-text);
 }
 
 .team-week__day {
@@ -375,7 +375,7 @@
 .team-legend__hint {
   margin: 10px 0 0;
   font-size: 12px;
-  color: var(--tgui--hint_color);
+  color: var(--app-quiet-text);
 }
 
 .team-details {

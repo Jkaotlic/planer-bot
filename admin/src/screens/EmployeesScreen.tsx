@@ -1,5 +1,5 @@
 import { ConfirmButton } from "../components/ConfirmButton";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { useTeamTz } from "../lib/team-today";
 import { EMPLOYEE_NAME_MAX, PREFERRED_NAME_MAX, cannotHearBot, filterPeople, formatBlockedSince, MONTH_NAMES, parseBirthDate, restrictionsSummary, toBirthDate } from "@planer/shared";
 import { apiClient, type CreateEmployeeResult, type Employee } from "../api/client";
@@ -371,6 +371,8 @@ function EmployeeRow({
   // Одно поле в строке на оба вида правки: имя и обращение — оба текст, и две
   // открытые правки разом раздвинули бы карточку ради ничего.
   const [editing, setEditing] = useState<"name" | "address" | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const detailsId = useId();
   // Свёрнуто на каждом заходе и у каждой карточки: ограничения админ ставит
   // редко, а сводка в кнопке уже говорит, кто исключён.
   const [restrictionsOpen, setRestrictionsOpen] = useState(false);
@@ -394,37 +396,22 @@ function EmployeeRow({
 
   return (
     <div className="employee-row-card" data-employee-id={employee.id}>
-      {position !== undefined && onReorder && (
-        <PositionField position={position} busy={busy} onCommit={onReorder} />
-      )}
-      <span className="avatar" style={{ background: palette.bg, color: palette.fg }}>
-        {initialsOf(employee.displayName)}
-      </span>
-      {/* Подпись только у обращения: пустое поле с подсказкой-именем внутри
-          иначе не отличить от правки имени (замер 1024). */}
-      {editing === "address" && <span className="employee-edit-label">Обращение</span>}
-      {editing ? (
-        <input
-          className="employee-name-input"
-          type="text"
-          value={draft}
-          maxLength={editing === "name" ? EMPLOYEE_NAME_MAX : PREFERRED_NAME_MAX}
-          aria-label={editing === "name" ? "Имя" : "Обращение"}
-          // Пустое поле обращения показывает, как бот зовёт сейчас.
-          placeholder={editing === "address" ? employee.address : undefined}
-          autoFocus
-          disabled={busy}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") save();
-            if (e.key === "Escape") cancel();
-          }}
-        />
-      ) : (
+      <div className="employee-summary">
+        <span className="avatar" style={{ background: palette.bg, color: palette.fg }} aria-hidden="true">
+          {initialsOf(employee.displayName)}
+        </span>
         <span className="employee-row-name" title={employee.displayName}>{employee.displayName}</span>
-      )}
-      {!editing && (
-        <>
+        <button
+          type="button"
+          className="employee-details-toggle"
+          aria-label={`Настройки работника: ${employee.displayName}`}
+          aria-expanded={detailsOpen}
+          aria-controls={detailsId}
+          onClick={() => setDetailsOpen(open => !open)}
+        >
+          <span aria-hidden="true">⌄</span>
+        </button>
+        <div className="employee-summary-status">
           <span className="status-chip" style={chipStyle}>
             {linked ? "привязан" : "не привязан"}
           </span>
@@ -448,147 +435,174 @@ function EmployeeRow({
             </span>
           )}
           {employee.isAdmin && <span className="admin-badge">админ</span>}
-        </>
-      )}
-      {!editing && onBirthDate && (
-        <span className="employee-birthday" title="День рождения">
-          🎂
-          <BirthDateField value={employee.birthDate} busy={busy} onChange={onBirthDate} />
-        </span>
-      )}
-      <span className="employee-row-spacer" />
-      {editing ? (
-        <>
-          <button type="button" className="btn btn-primary" onClick={save} disabled={busy}>
-            {busy ? "…" : "Сохранить"}
-          </button>
-          <button type="button" className="btn btn-secondary" onClick={cancel} disabled={busy}>
-            Отмена
-          </button>
-        </>
-      ) : (
-        <>
-          {onRename && (
-            <button type="button" className="btn btn-secondary" onClick={() => startEditing("name")} disabled={busy} title="Переименовать">
-              ✎ Имя
+          {employee.isObserver && <span className="admin-badge">наблюдатель</span>}
+        </div>
+      </div>
+      <div id={detailsId} className="employee-details" data-open={detailsOpen}>
+        {position !== undefined && onReorder && (
+          <PositionField position={position} busy={busy} onCommit={onReorder} />
+        )}
+        {/* Подпись только у обращения: пустое поле с подсказкой-именем внутри
+            иначе не отличить от правки имени (замер 1024). */}
+        {editing === "address" && <span className="employee-edit-label">Обращение</span>}
+        {editing ? (
+          <input
+            className="employee-name-input"
+            type="text"
+            value={draft}
+            maxLength={editing === "name" ? EMPLOYEE_NAME_MAX : PREFERRED_NAME_MAX}
+            aria-label={editing === "name" ? "Имя" : "Обращение"}
+            // Пустое поле обращения показывает, как бот зовёт сейчас.
+            placeholder={editing === "address" ? employee.address : undefined}
+            autoFocus
+            disabled={busy}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") save();
+              if (e.key === "Escape") cancel();
+            }}
+          />
+        ) : null}
+        {!editing && onBirthDate && (
+          <span className="employee-birthday" title="День рождения">
+            🎂
+            <BirthDateField value={employee.birthDate} busy={busy} onChange={onBirthDate} />
+          </span>
+        )}
+        <span className="employee-row-spacer" />
+        {editing ? (
+          <>
+            <button type="button" className="btn btn-primary" onClick={save} disabled={busy}>
+              {busy ? "…" : "Сохранить"}
             </button>
-          )}
+            <button type="button" className="btn btn-secondary" onClick={cancel} disabled={busy}>
+              Отмена
+            </button>
+          </>
+        ) : (
+          <>
+            {onRename && (
+              <button type="button" className="btn btn-secondary" onClick={() => startEditing("name")} disabled={busy} title="Переименовать">
+                ✎ Имя
+              </button>
+            )}
 
-          {onShowInvite && !linked && (
-            <button type="button" className="btn btn-secondary" onClick={onShowInvite} disabled={busy} title="Показать ссылку-приглашение">
-              🔗 Ссылка
-            </button>
-          )}
-          {onToggleAdmin && employee.telegramUserId != null && (
-            <button type="button" className="btn btn-secondary" onClick={onToggleAdmin} disabled={busy}>
-              {employee.isAdmin ? "Убрать из админов" : "Сделать админом"}
-            </button>
-          )}
-          {confirmQuestion ? (
-            <ConfirmButton
-              label={busy ? "…" : actionLabel}
-              question={confirmQuestion}
-              confirmLabel={`Да, ${actionLabel.toLowerCase()}`}
-              disabled={busy}
-              onConfirm={onAction}
-            />
-          ) : (
-            <button type="button" className="btn btn-secondary" onClick={onAction} disabled={busy}>
-              {busy ? "…" : actionLabel}
-            </button>
-          )}
-        </>
-      )}
-      {/* Что бот скажет на самом деле. Всегда, а не «когда отличается от первого
-          слова ФИО»: угадывать, какое слово — имя, эта функция и отказывается.
-          Своей строкой под рядом, а не подписью под именем: запас ширины в ряду
-          у карточки 50–70 px (замер 1280), и строка под именем расширяла блок
-          имени так, что «Архивировать» уезжало на вторую строку у каждого. */}
-      {!editing && (
-        <div className="employee-address-line">
-          <span className="employee-address-text">Бот зовёт: {employee.address}</span>
-          {onPreferredName && (
+            {onShowInvite && !linked && (
+              <button type="button" className="btn btn-secondary" onClick={onShowInvite} disabled={busy} title="Показать ссылку-приглашение">
+                🔗 Ссылка
+              </button>
+            )}
+            {onToggleAdmin && employee.telegramUserId != null && (
+              <button type="button" className="btn btn-secondary" onClick={onToggleAdmin} disabled={busy}>
+                {employee.isAdmin ? "Убрать из админов" : "Сделать админом"}
+              </button>
+            )}
+            {confirmQuestion ? (
+              <ConfirmButton
+                label={busy ? "…" : actionLabel}
+                question={confirmQuestion}
+                confirmLabel={`Да, ${actionLabel.toLowerCase()}`}
+                disabled={busy}
+                onConfirm={onAction}
+              />
+            ) : (
+              <button type="button" className="btn btn-secondary" onClick={onAction} disabled={busy}>
+                {busy ? "…" : actionLabel}
+              </button>
+            )}
+          </>
+        )}
+        {/* Что бот скажет на самом деле. Всегда, а не «когда отличается от первого
+            слова ФИО»: угадывать, какое слово — имя, эта функция и отказывается.
+            Своей строкой под рядом, а не подписью под именем: запас ширины в ряду
+            у карточки 50–70 px (замер 1280), и строка под именем расширяла блок
+            имени так, что «Архивировать» уезжало на вторую строку у каждого. */}
+        {!editing && (
+          <div className="employee-address-line">
+            <span className="employee-address-text">Бот зовёт: {employee.address}</span>
+            {onPreferredName && (
+              <button
+                type="button"
+                className="employee-address-edit"
+                onClick={() => startEditing("address")}
+                disabled={busy}
+                title="Как бот обращается к человеку в сообщениях"
+              >
+                ✎ Обращение
+              </button>
+            )}
+          </div>
+        )}
+        {!editing && (
+          <div className="employee-restrictions">
+            {/* Сводка читает значения ИЗ БАЗЫ (как и галки ниже), а не эффективные:
+                свёрнутая и раскрытая карточки не должны противоречить друг другу. */}
             <button
               type="button"
-              className="employee-address-edit"
-              onClick={() => startEditing("address")}
-              disabled={busy}
-              title="Как бот обращается к человеку в сообщениях"
+              className={`btn btn-quiet btn-compact employee-restrictions-toggle${restrictionsSummary(employee) !== "нет" ? " employee-restrictions-toggle--set" : ""}`}
+              aria-expanded={restrictionsOpen}
+              onClick={() => setRestrictionsOpen((open) => !open)}
             >
-              ✎ Обращение
+              <span className="employee-restrictions-summary">Ограничения: {restrictionsSummary(employee)}</span>
+              <span aria-hidden="true">{restrictionsOpen ? "▴" : "▾"}</span>
             </button>
-          )}
-        </div>
-      )}
-      {!editing && (
-        <div className="employee-restrictions">
-          {/* Сводка читает значения ИЗ БАЗЫ (как и галки ниже), а не эффективные:
-              свёрнутая и раскрытая карточки не должны противоречить друг другу. */}
-          <button
-            type="button"
-            className={`btn btn-quiet btn-compact employee-restrictions-toggle${restrictionsSummary(employee) !== "нет" ? " employee-restrictions-toggle--set" : ""}`}
-            aria-expanded={restrictionsOpen}
-            onClick={() => setRestrictionsOpen((open) => !open)}
-          >
-            <span className="employee-restrictions-summary">Ограничения: {restrictionsSummary(employee)}</span>
-            <span aria-hidden="true">{restrictionsOpen ? "▴" : "▾"}</span>
-          </button>
-          {restrictionsOpen && (
-            <div className="employee-restrictions-body">
-              <label className="employee-restriction-checkbox">
-                <input
-                  type="checkbox"
-                  checked={employee.isObserver}
-                  disabled={busy}
-                  onChange={() => onSetObserver(!employee.isObserver)}
-                />
-                Наблюдатель
-                <span className="employee-restriction-hint">
-                  — смотрит график, ведёт свой, шлёт анонсы. Вне раздачи, обменов и передачи смен
-                </span>
-              </label>
-              <label
-                className="employee-restriction-checkbox"
-                style={employee.isObserver ? { cursor: "default" } : undefined}
-              >
-                <input
-                  type="checkbox"
-                  // Значение из базы, а не эффективное («и так вне назначений из-за
-                  // роли») — админ должен видеть, куда человек вернётся, когда роль
-                  // снимут, а не то, что происходит с ним сейчас. Mirrors the Mini
-                  // App's AdminEmployeesScreen.
-                  checked={employee.excludedFromAssignment}
-                  disabled={busy || employee.isObserver}
-                  onChange={() => onSetRestrictions({ excludedFromAssignment: !employee.excludedFromAssignment })}
-                />
-                Не участвует в назначениях
-                <span className="employee-restriction-hint">
-                  {employee.isObserver
-                    ? "— управляется ролью «Наблюдатель»"
-                    : "— бот не зовёт его на работу в выходные и не подсказывает его в очереди дежурств; вручную поставить можно"}
-                </span>
-              </label>
-              <label
-                className="employee-restriction-checkbox"
-                style={employee.isObserver ? { cursor: "default" } : undefined}
-              >
-                <input
-                  type="checkbox"
-                  checked={employee.excludedFromSwaps}
-                  disabled={busy || employee.isObserver}
-                  onChange={() => onSetRestrictions({ excludedFromSwaps: !employee.excludedFromSwaps })}
-                />
-                Не участвует в обменах
-                <span className="employee-restriction-hint">
-                  {employee.isObserver
-                    ? "— управляется ролью «Наблюдатель»"
-                    : "— ни предложить, ни принять обмен; открытые заявки будут отменены"}
-                </span>
-              </label>
-            </div>
-          )}
-        </div>
-      )}
+            {restrictionsOpen && (
+              <div className="employee-restrictions-body">
+                <label className="employee-restriction-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={employee.isObserver}
+                    disabled={busy}
+                    onChange={() => onSetObserver(!employee.isObserver)}
+                  />
+                  Наблюдатель
+                  <span className="employee-restriction-hint">
+                    — смотрит график, ведёт свой, шлёт анонсы. Вне раздачи, обменов и передачи смен
+                  </span>
+                </label>
+                <label
+                  className="employee-restriction-checkbox"
+                  style={employee.isObserver ? { cursor: "default" } : undefined}
+                >
+                  <input
+                    type="checkbox"
+                    // Значение из базы, а не эффективное («и так вне назначений из-за
+                    // роли») — админ должен видеть, куда человек вернётся, когда роль
+                    // снимут, а не то, что происходит с ним сейчас. Mirrors the Mini
+                    // App's AdminEmployeesScreen.
+                    checked={employee.excludedFromAssignment}
+                    disabled={busy || employee.isObserver}
+                    onChange={() => onSetRestrictions({ excludedFromAssignment: !employee.excludedFromAssignment })}
+                  />
+                  Не участвует в назначениях
+                  <span className="employee-restriction-hint">
+                    {employee.isObserver
+                      ? "— управляется ролью «Наблюдатель»"
+                      : "— бот не зовёт его на работу в выходные и не подсказывает его в очереди дежурств; вручную поставить можно"}
+                  </span>
+                </label>
+                <label
+                  className="employee-restriction-checkbox"
+                  style={employee.isObserver ? { cursor: "default" } : undefined}
+                >
+                  <input
+                    type="checkbox"
+                    checked={employee.excludedFromSwaps}
+                    disabled={busy || employee.isObserver}
+                    onChange={() => onSetRestrictions({ excludedFromSwaps: !employee.excludedFromSwaps })}
+                  />
+                  Не участвует в обменах
+                  <span className="employee-restriction-hint">
+                    {employee.isObserver
+                      ? "— управляется ролью «Наблюдатель»"
+                      : "— ни предложить, ни принять обмен; открытые заявки будут отменены"}
+                  </span>
+                </label>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
       {/* The refusal belongs where the click was. `flex-basis: 100%` puts it on
           its own line inside the card — the card already wraps. */}
       {error && (

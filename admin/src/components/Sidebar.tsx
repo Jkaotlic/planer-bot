@@ -46,14 +46,15 @@ export function navLabel(key: NavKey): string {
 /** Left navigation rail: brand, nav items, and a footer identifying the signed-in admin. */
 export function Sidebar({ active, onChange, adminLabel, open, badges }: SidebarProps) {
   return (
-    <aside className={`sidebar${open ? " open" : ""}`}>
+    <aside id="admin-sidebar" className={`sidebar${open ? " open" : ""}`}>
       <div className="sidebar-brand">Смены</div>
-      <nav className="sidebar-nav">
+      <nav className="sidebar-nav" aria-label="Разделы админки">
         {NAV_ITEMS.map((item) => (
           <button
             key={item.key}
             type="button"
             className={`sidebar-nav-item${active === item.key ? " active" : ""}`}
+            aria-current={active === item.key ? "page" : undefined}
             onClick={() => onChange(item.key)}
           >
             <span className="sidebar-nav-icon">{item.icon}</span>
