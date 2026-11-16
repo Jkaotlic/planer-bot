@@ -157,13 +157,16 @@ describe("QR-код по ссылке от сотрудника", () => {
   it("рисует последним стилем, который автор выбрал в мини-аппе; подпись — по-прежнему ссылка", async () => {
     const { db, bot, api } = stage();
     const anya = person(db, "Аня", 333, null);
-    setQrStyle(db, anya, { shape: "dots", color: "blue" });
+    const style = { shape: "dots", color: "blue", logo: "sber" } as const;
+    setQrStyle(db, anya, style);
 
     await say(bot, 333, "https://example.com/menu");
 
     const [photo] = photos(api.calls);
     expect(photo!.payload.caption).toBe("https://example.com/menu");
-    expect(Buffer.from(await photo!.payload.photo.toRaw())).toEqual(renderQrPng("https://example.com/menu", { shape: "dots", color: "blue" }));
+    const png = Buffer.from(await photo!.payload.photo.toRaw());
+    expect(png).toEqual(renderQrPng("https://example.com/menu", style));
+    expect(png).not.toEqual(renderQrPng("https://example.com/menu", { shape: "dots", color: "blue" }));
     expect(await decodePhoto(photo!)).toBe("https://example.com/menu");
   });
 

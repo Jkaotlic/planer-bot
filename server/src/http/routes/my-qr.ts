@@ -37,7 +37,7 @@ export function createMyQrRoutes(deps: { db: Db; config: Config; bot?: Bot; now?
 
   routes.put("/api/my/qr-style", requireAuth(db, config.jwtSecret), async (c) => {
     const parsed = qrSavedStyleSchema.safeParse(await c.req.json().catch(() => null));
-    if (!parsed.success) return c.json({ error: "Неизвестная форма или цвет QR-кода" }, 400);
+    if (!parsed.success) return c.json({ error: "Неизвестная форма, цвет или логотип QR-кода" }, 400);
     if (!setQrStyle(db, c.get("auth").employeeId, parsed.data)) return c.json({ error: "not_found" }, 404);
     return c.json({ qrStyle: parsed.data });
   });

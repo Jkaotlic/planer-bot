@@ -1441,8 +1441,9 @@ export const realClient: ApiClient = {
   },
 
   async setQrStyle(style) {
-    // Только два поля: сервер строг к лишним (подпись — про один код, а не про вкус).
-    const { qrStyle } = await authorizedPutJson<{ qrStyle: QrSavedStyle }>("/api/my/qr-style", { shape: style.shape, color: style.color });
+    // Подпись относится к одному коду, поэтому её не сохраняем как настройку.
+    const { shape, color, logo } = style;
+    const { qrStyle } = await authorizedPutJson<{ qrStyle: QrSavedStyle }>("/api/my/qr-style", { shape, color, logo });
     return qrStyle;
   },
 

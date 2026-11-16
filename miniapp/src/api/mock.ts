@@ -123,7 +123,8 @@ export async function mockSetStartTab(tab: StartTab | null): Promise<StartTab | 
 /** DEV: стиль QR-кода живёт в том же `MOCK_ME`, что и остальные настройки. */
 export async function mockSetQrStyle(style: QrSavedStyle): Promise<QrSavedStyle> {
   await delay(150);
-  MOCK_ME.qrStyle = { shape: style.shape, color: style.color };
+  const { shape, color, logo } = style;
+  MOCK_ME.qrStyle = { shape, color, ...(logo ? { logo } : {}) };
   return MOCK_ME.qrStyle;
 }
 
@@ -136,7 +137,8 @@ export async function mockSendQrToMe(text: string, style: QrStyle): Promise<void
   if (text.length > QR_MAX_TEXT_LENGTH) {
     throw new Error(`Слишком длинно для QR-кода: ${text.length} знаков, а помещается ${QR_MAX_TEXT_LENGTH}.`);
   }
-  MOCK_ME.qrStyle = { shape: style.shape, color: style.color };
+  const { caption: _caption, ...saved } = style;
+  MOCK_ME.qrStyle = saved;
 }
 
 export async function mockSetRemindersEnabled(enabled: boolean): Promise<boolean> {

@@ -88,6 +88,17 @@ export function QrScreen() {
               {preview.message}
             </div>
           )}
+          <label className="qr-logo-option">
+            <input
+              type="checkbox"
+              checked={style.logo === "sber"}
+              onChange={(event) => {
+                const checked = event.target.checked;
+                setStyle((s) => ({ ...s, logo: checked ? "sber" : undefined }));
+              }}
+            />
+            Логотип Сбера
+          </label>
           <div className="field-group">
             <span className="field-label">Форма</span>
             <div className="qr-shapes">

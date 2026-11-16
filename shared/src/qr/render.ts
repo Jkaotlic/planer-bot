@@ -69,6 +69,43 @@ function eye(x: number, y: number, soft: boolean): string {
   );
 }
 
+function roundEye(x: number, y: number): string {
+  const cx = x + 3.5 * UNIT;
+  const cy = y + 3.5 * UNIT;
+  return dot(cx, cy, 3.5 * UNIT) + dot(cx, cy, 2.5 * UNIT) + dot(cx, cy, 1.5 * UNIT);
+}
+
+// Монохромный знак с фотографии. Один контур для браузера и PNG бота.
+const SBER_MARK = "M48.46 9.35A28 28 0 1 0 59.57 27.14L53.66 28.18A22 22 0 1 1 44.93 14.2Z M19 27L30 34L55 15L59 20L30 42L19 35Z";
+
+function logoRadius(modules: ReturnType<typeof QRCode.create>["modules"]): number {
+  return Math.min(7, Math.round(modules.size * 0.095));
+}
+
+function qrWithLogo(text: string) {
+  const errorCorrectionLevel = "H";
+  let qr = QRCode.create(text, { errorCorrectionLevel });
+  // В некоторых версиях в центре стоит узор выравнивания. Перейти к следующей
+  // подходящей матрице надёжнее, чем прятать этот узор под знаком.
+  for (;;) {
+    const { modules } = qr;
+    const center = (modules.size - 1) / 2;
+    const radius = logoRadius(modules);
+    let fits = true;
+    for (let row = center - radius; row <= center + radius && fits; row += 1) {
+      for (let col = center - radius; col <= center + radius; col += 1) {
+        if (modules.isReserved(row, col)) {
+          fits = false;
+          break;
+        }
+      }
+    }
+    if (fits) return modules;
+    if (qr.version === 40) throw new QrTextError("Сократи текст или выключи логотип Сбера.");
+    qr = QRCode.create(text, { errorCorrectionLevel, version: qr.version + 1 });
+  }
+}
+
 /** Подпись идёт в SVG текстом — всё, что XML понимает как разметку, экранируется. */
 function escapeXml(value: string): string {
   return value
@@ -160,12 +197,16 @@ export function renderQr(text: string, style: QrStyle): QrPicture {
 
   let modules: ReturnType<typeof QRCode.create>["modules"];
   try {
-    modules = QRCode.create(text, { errorCorrectionLevel: levelFor(style.shape) }).modules;
+    modules = style.logo
+      ? qrWithLogo(text)
+      : QRCode.create(text, { errorCorrectionLevel: levelFor(style.shape) }).modules;
   } catch {
     throw new QrTextError(
-      style.shape === "classic"
-        ? "Текст не помещается в QR-код — сократи его."
-        : "Текст не помещается в QR-код этой формы — сократи его или выбери «Классику»: она вмещает больше.",
+      style.logo
+        ? "Текст не помещается в QR-код с логотипом — сократи его или выключи логотип Сбера."
+        : style.shape === "classic"
+          ? "Текст не помещается в QR-код — сократи его."
+          : "Текст не помещается в QR-код этой формы — сократи его или выбери «Классику»: она вмещает больше.",
     );
   }
 
@@ -173,13 +214,18 @@ export function renderQr(text: string, style: QrStyle): QrPicture {
   const across = n + 2 * QR_QUIET_ZONE;
   const offset = QR_QUIET_ZONE * UNIT;
   const size = across * UNIT;
+  const center = (n - 1) / 2;
+  const radius = style.logo ? logoRadius(modules) : -1;
+  const logoFirst = center - radius;
+  const logoLast = center + radius;
   const isEye = (r: number, c: number) => (r < 7 && c < 7) || (r < 7 && c >= n - 7) || (r >= n - 7 && c < 7);
 
   let fixed = "";
   let data = "";
   for (let r = 0; r < n; r += 1) {
+    const logoRow = r >= logoFirst && r <= logoLast;
     for (let c = 0; c < n; c += 1) {
-      if (!modules.get(r, c) || isEye(r, c)) continue;
+      if (!modules.get(r, c) || isEye(r, c) || (logoRow && c >= logoFirst && c <= logoLast)) continue;
       const x = offset + c * UNIT;
       const y = offset + r * UNIT;
       if (style.shape === "classic" || modules.isReserved(r, c)) fixed += `M${x} ${y}h${UNIT}v${UNIT}h${-UNIT}z`;
@@ -187,9 +233,15 @@ export function renderQr(text: string, style: QrStyle): QrPicture {
     }
   }
   const soft = style.shape === "soft";
-  const eyes = eye(offset, offset, soft) + eye(offset + (n - 7) * UNIT, offset, soft) + eye(offset, offset + (n - 7) * UNIT, soft);
+  const drawEye = style.logo && soft ? roundEye : eye;
+  const eyes = drawEye(offset, offset, soft) + drawEye(offset + (n - 7) * UNIT, offset, soft) + drawEye(offset, offset + (n - 7) * UNIT, soft);
 
   const ink = QR_COLORS[style.color].hex;
+  const logoSize = (2 * radius + 1) * UNIT - 8;
+  const logoStart = (size - logoSize) / 2;
+  const logo = style.logo
+    ? `<path fill="${ink}" transform="translate(${logoStart} ${logoStart}) scale(${logoSize / 64})" d="${SBER_MARK}"/>`
+    : "";
   // Подпись ниже тихой зоны, а не в ней: текст у края кода сканер принимает за модули.
   // Кегль подгоняется под длину, чтобы 40 знаков влезли в ширину кода одной строкой.
   // Считаем по самой широкой букве (W, Ж, Ш — до ~1 em в DejaVu Sans), а не по средней
@@ -208,6 +260,7 @@ export function renderQr(text: string, style: QrStyle): QrPicture {
     `<rect width="${size}" height="${heightUnits}" fill="#FFFFFF"/>` +
     `<path fill="${ink}" fill-rule="evenodd" d="${eyes}"/>` +
     `<path fill="${ink}" d="${fixed}${data}"/>` +
+    logo +
     label +
     "</svg>";
   return { svg, width, height };

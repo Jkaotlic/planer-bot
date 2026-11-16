@@ -18,5 +18,14 @@ describe("GET /api/me — QR style", () => {
     expect((await (await app.request("/api/me", auth)).json()).qrStyle).toEqual({ shape: "classic", color: "black" });
     setQrStyle(db, anya.id, { shape: "rounded", color: "purple" });
     expect((await (await app.request("/api/me", auth)).json()).qrStyle).toEqual({ shape: "rounded", color: "purple" });
+
+    const branded = { shape: "rounded", color: "purple", logo: "sber" };
+    const saved = await app.request("/api/my/qr-style", {
+      method: "PUT",
+      headers: { ...auth.headers, "Content-Type": "application/json" },
+      body: JSON.stringify(branded),
+    });
+    expect(saved.status).toBe(200);
+    expect((await (await app.request("/api/me", auth)).json()).qrStyle).toEqual(branded);
   });
 });

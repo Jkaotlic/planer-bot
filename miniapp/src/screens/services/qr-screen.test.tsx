@@ -71,6 +71,21 @@ describe("экран «QR-код»", () => {
     }
   });
 
+  it("логотип меняет предпросмотр и сохраняется при выходе", async () => {
+    const selected = { shape: "classic", color: "black", logo: "sber" } as const;
+    const save = vi.spyOn(apiClient, "setQrStyle").mockResolvedValue(selected);
+    const { el, onSaved } = await render();
+    await type(el.querySelector("textarea")!, "https://example.com");
+    const plain = preview(el)!.src;
+    const label = [...el.querySelectorAll("label")].find((item) => item.textContent === "Логотип Сбера");
+    expect(label?.control).toBeInstanceOf(HTMLInputElement);
+    await act(async () => label!.click());
+    expect(preview(el)!.src).not.toBe(plain);
+    await act(async () => button(el, "Назад").click());
+    expect(save).toHaveBeenCalledWith(selected);
+    expect(onSaved).toHaveBeenCalledWith(selected);
+  });
+
   it("подпись — не длиннее 40 знаков и попадает в картинку экранированной", async () => {
     const { el } = await render();
     const caption = el.querySelector<HTMLInputElement>('input[maxlength]')!;

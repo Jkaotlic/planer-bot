@@ -69,6 +69,18 @@ describe("самые плотные коды на отдаваемой шири�
   });
 });
 
+describe.each(QR_SHAPES)("QR со знаком Сбера, форма %s", (shape) => {
+  it("различается с обычным QR и читается сканером", () => {
+    const plain = { shape, color: "black" } as const;
+    const branded = { ...plain, logo: "sber" } as const;
+    for (const text of ["а", SHORT, CYRILLIC, LONG.slice(0, 130), LONG.slice(0, 900)]) {
+      const png = picture(text, branded);
+      expect(png.equals(picture(text, plain))).toBe(false);
+      expect(decode(onDark(png)), `${shape}/${text.length}`).toBe(text);
+    }
+  });
+});
+
 describe("тихая зона", () => {
   it("вокруг кода белая рамка не уже 4 модулей", () => {
     const image = PNG.sync.read(picture(SHORT, { shape: "classic", color: "black" }));

@@ -14,7 +14,7 @@ import { apiClient } from "../../api/client";
 import { ActionButton, Group, Hint, Screen } from "../../ui";
 
 function sameStyle(a: QrSavedStyle, b: QrSavedStyle): boolean {
-  return a.shape === b.shape && a.color === b.color;
+  return a.shape === b.shape && a.color === b.color && a.logo === b.logo;
 }
 
 /**
@@ -61,8 +61,8 @@ export function QrScreen({ initialStyle, onClose, onSaved }: {
       // на сервере сейчас, а новый выбор родитель принимает через `onSaved` — после
       // ответа. Раньше он писался в `me` сразу, и при отказе экран обещал стиль,
       // которым бот рисовать не станет.
-      void apiClient.setQrStyle(style).then(() => onSaved?.(style), () => {});
       onClose(saved);
+      void apiClient.setQrStyle(style).then((confirmed) => onSaved?.(confirmed), () => {});
       return;
     }
     onClose(style);
@@ -118,6 +118,18 @@ export function QrScreen({ initialStyle, onClose, onSaved }: {
           <span style={{ color: "#5F6368", fontSize: 14 }}>Здесь появится код</span>
         )}
       </div>
+
+      <label className="qr-logo-option">
+        <input
+          type="checkbox"
+          checked={style.logo === "sber"}
+          onChange={(event) => {
+            const checked = event.target.checked;
+            edit(() => setStyle((s) => ({ ...s, logo: checked ? "sber" : undefined })));
+          }}
+        />
+        Логотип Сбера
+      </label>
 
       <Group header="Форма">
         <div style={{ display: "flex", gap: "clamp(4px, 4.57vw - 9.8px, 8px)" }}>

@@ -48,7 +48,7 @@ export const QR_RASTER_WIDTH = 1024;
 
 /** Что запоминается за человеком. Подписи здесь нет: она про один код, а не про вкус. */
 export const qrSavedStyleSchema = z
-  .object({ shape: z.enum(QR_SHAPES), color: z.enum(QR_COLOR_KEYS) })
+  .object({ shape: z.enum(QR_SHAPES), color: z.enum(QR_COLOR_KEYS), logo: z.literal("sber").optional() })
   .strict();
 export type QrSavedStyle = z.infer<typeof qrSavedStyleSchema>;
 

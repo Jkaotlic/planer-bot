@@ -86,7 +86,7 @@ export function setWeekLegend(db: Db, employeeId: number, enabled: boolean): Emp
  * stamped on every link the person ever sends the bot.
  */
 export function setQrStyle(db: Db, employeeId: number, style: QrSavedStyle): Employee | undefined {
-  const value = JSON.stringify({ shape: style.shape, color: style.color });
+  const value = JSON.stringify({ shape: style.shape, color: style.color, logo: style.logo });
   return db.update(employees).set({ qrStyle: value }).where(eq(employees.id, employeeId)).returning().all()[0];
 }
 

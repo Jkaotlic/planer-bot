@@ -380,6 +380,21 @@ textarea {
    контрастному полюсу темы, поэтому одно правило годится для обеих. */
 /* Запасной цвет — без смеси, сама смесь под `@supports`: Safari < 16.2 её не знает, а
    вторую строку `color` в том же правиле сборщик выбрасывает (замер dist 2026-10-06). */
+.qr-logo-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  cursor: pointer;
+}
+
+.qr-logo-option input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--tgui--accent_text_color);
+}
+
 .ui-hint.qr-hint {
   color: var(--tgui--text_color);
 }

@@ -203,13 +203,13 @@ describe("QR-код: real client", () => {
     });
   }
 
-  it("setQrStyle шлёт PUT только с формой и цветом", async () => {
+  it("setQrStyle шлёт форму, цвет и логотип без подписи", async () => {
     const log: Array<{ url: string; method: string; body: unknown }> = [];
     stubFetch(log);
     const { realClient } = await import("./client");
-    const saved = await realClient.setQrStyle({ shape: "dots", color: "blue", caption: "x" } as never);
+    const saved = await realClient.setQrStyle({ shape: "dots", color: "blue", logo: "sber", caption: "x" } as never);
     expect(saved).toEqual({ shape: "dots", color: "blue" });
-    expect(log).toEqual([{ url: expect.stringMatching(/\/api\/my\/qr-style$/), method: "PUT", body: { shape: "dots", color: "blue" } }]);
+    expect(log).toEqual([{ url: expect.stringMatching(/\/api\/my\/qr-style$/), method: "PUT", body: { shape: "dots", color: "blue", logo: "sber" } }]);
   });
 
   it("sendQrToMe шлёт POST с текстом и стилем и отдаёт отказ сервера его словами", async () => {

@@ -3807,6 +3807,19 @@ textarea {
   font-size: var(--text-body);
 }
 
+.qr-logo-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--control-h);
+  width: fit-content;
+  cursor: pointer;
+}
+
+.qr-logo-option input {
+  accent-color: var(--button);
+}
+
 .qr-shape {
   display: flex;
   flex-direction: column;

@@ -51,7 +51,7 @@ const FORM_ADVICE =
   "Чтобы получить код, выбери «Классику» в мини-аппе: 🧰 Сервисы → QR-код — она вмещает больше.";
 
 function classicWouldFit(url: string, style: QrSavedStyle): boolean {
-  if (style.shape === "classic") return false;
+  if (style.shape === "classic" || style.logo) return false;
   try {
     renderQr(url, { ...style, shape: "classic" });
     return true;
