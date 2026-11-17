@@ -1,8 +1,8 @@
 import {
-  FOOD_CLOSE_HORIZON_DAYS, dateStr, FOOD_ITEMS_PER_PERSON_MAX, FOOD_QTY_MAX, announcementRole, closesAtFromTime, closesLabel, debtOf, debtors, dishSummary, itemsLimitText, qtyLimitText,
-  isFutureClose, isOpenAt, isWithinCloseHorizon, orderItemInputSchema, orderTotal, paymentProgress, placeInputSchema, pollTally,
-  type AudienceCandidate, type FoodSendReport, type FoodUnit, type OrderRemindResult, type OrderView, type PollRemindResult, type PlaceInput, type PlaceView,
-  type PollChoice, type PollView, type TeamAudience,
+  FOOD_CLOSE_HORIZON_DAYS, dateStr, FOOD_ITEMS_PER_PERSON_MAX, FOOD_QTY_MAX, POLL_QUESTION_MAX, POLL_TELEGRAM_QUESTION_MAX, announcementRole, closesAtFromTime, closesLabel, debtOf, debtors, dishSummary, itemsLimitText, qtyLimitText,
+  isFutureClose, isOpenAt, isWithinCloseHorizon, orderItemInputSchema, orderTotal, paymentProgress, placeInputSchema, pollTally, telegramPollConfigSchema,
+  type AudienceCandidate, type CreatePollInput, type FoodSendReport, type FoodUnit, type OrderRemindResult, type OrderView, type PollRemindResult,
+  type PlaceInput, type PlaceView, type PollChoice, type PollView, type TeamAudience, type TelegramPollConfig,
 } from "@planer/shared";
 import { delay } from "./delay";
 
@@ -75,6 +75,7 @@ export function createFoodMock(opts: FoodMockOptions) {
     cancelledAt: string | null;
     recipients: number[];
     votes: Map<number, PollChoice>;
+    telegram?: TelegramPollConfig & { chats: Map<number, number> };
   }
 
   const POLLS: MockPoll[] = [];
@@ -100,6 +101,8 @@ export function createFoodMock(opts: FoodMockOptions) {
       .map((id) => staff().find((e) => e.id === id))
       .filter((e): e is FoodMockPerson => e != null && e.isActive)
       .map((e) => ({ employeeId: e.id, displayName: e.displayName }));
+    const open = isOpenAt(p, now);
+    const viewerChat = p.telegram?.chats.get(me().id);
     return {
       id: p.id,
       question: p.question,
@@ -107,13 +110,23 @@ export function createFoodMock(opts: FoodMockOptions) {
       creatorName: staff().find((e) => e.id === p.createdBy)?.displayName ?? "—",
       closesAt: p.closesAt,
       closes: closesLabel(p.closesAt, now.date),
-      open: isOpenAt(p, now),
+      open,
       cancelled: p.cancelledAt != null,
       isCreator: p.createdBy === me().id,
       canManage: p.createdBy === me().id || me().isAdmin,
       myChoice: p.votes.get(me().id) ?? null,
       tally: pollTally(people, [...p.votes].map(([employeeId, choice]) => ({ employeeId, choice }))),
       recipientCount: people.length,
+      ...(p.telegram && {
+        telegram: {
+          options: p.telegram.options.map((text) => ({ text, count: 0 })),
+          multiple: p.telegram.multiple,
+          myOptionIds: [],
+          votedCount: 0,
+          canVote: open && viewerChat != null
+            && staff().some((person) => person.id === me().id && person.isActive && person.telegramUserId === viewerChat),
+        },
+      }),
     };
   }
 
@@ -168,9 +181,13 @@ export function createFoodMock(opts: FoodMockOptions) {
     return { delivered, deliveredToNobody: false };
   }
 
-  async function createPoll(input: { question: string; closesTime: string | null; audience: TeamAudience }): Promise<{ poll: PollView } & FoodSendReport> {
+  async function createPoll(input: CreatePollInput): Promise<{ poll: PollView } & FoodSendReport> {
     await wait();
-    if (!input.question.trim()) throw new Error("Проверь вопрос, время и адресатов.");
+    const question = input.question.trim();
+    const questionMax = input.telegram ? POLL_TELEGRAM_QUESTION_MAX : POLL_QUESTION_MAX;
+    if (!question || question.length > questionMax) throw new Error("Проверь вопрос, время и адресатов.");
+    const telegram = input.telegram && telegramPollConfigSchema.safeParse(input.telegram);
+    if (telegram && !telegram.success) throw new Error("Добавь от 2 до 12 разных вариантов ответа.");
     const now = clock();
     // Как у `POST /api/polls`: прошедшее сегодня время — завтрашнее, отказа нет.
     const closesAt = closesAtFromTime(input.closesTime, now);
@@ -185,7 +202,7 @@ export function createFoodMock(opts: FoodMockOptions) {
     }
     const poll: MockPoll = {
       id: nextPollId++,
-      question: input.question.trim(),
+      question,
       createdBy: me().id,
       closesAt,
       closedAt: null,
@@ -193,6 +210,16 @@ export function createFoodMock(opts: FoodMockOptions) {
       recipients,
       votes: new Map<number, PollChoice>(),
     };
+    if (telegram?.success) {
+      // Как у настоящей карточки в Telegram: смена привязанного аккаунта
+      // сама по себе не доставляет старое личное сообщение в новый чат.
+      const chats = new Map<number, number>();
+      for (const id of recipients) {
+        const chat = telegramOf(id);
+        if (chat != null) chats.set(id, chat);
+      }
+      poll.telegram = { ...telegram.data, chats };
+    }
     POLLS.push(poll);
     // «Не дошло» — адресаты без Telegram, как `resolveAudience.unreachable`; «дошло» и флаг
     // считает `colleagueReport`.
@@ -217,6 +244,7 @@ export function createFoodMock(opts: FoodMockOptions) {
     await wait();
     const p = pollOrThrow(id);
     if (!isOpenAt(p, clock())) throw new Error("Опрос закрыт.");
+    if (p.telegram) throw new Error("Голосуй в личном чате с ботом в Telegram.");
     p.votes.set(me().id, choice);
     return pollViewOf(p);
   }

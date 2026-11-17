@@ -1,4 +1,5 @@
-import { and, asc, eq, lte } from "drizzle-orm";
+import { and, asc, eq, lte, notExists } from "drizzle-orm";
+import { alias } from "drizzle-orm/sqlite-core";
 import { GrammyError, InlineKeyboard, type Bot } from "grammy";
 import type { InlineKeyboardMarkup } from "grammy/types";
 import type { Db } from "../db/client";
@@ -6,12 +7,14 @@ import { foodCloseMessages, foodOrderPayments } from "../db/schema";
 import { getEmployeeById } from "../repo/employees";
 import { isPermanentSendFailure } from "../bot/notify";
 import { safeErrorMessage } from "../util/safe-error";
+import { getPoll, hasTelegramPollFinalState, isTelegramPollSending, recordTelegramPollState, telegramPollResultText } from "../polls/poll-service";
 
 type Scope = typeof foodCloseMessages.$inferSelect.scope;
 export type FoodCloseReason = "closed" | "cancelled";
 export type FoodCloseMessage = { employeeId: number; telegramUserId: number } & (
-  { messageId: number; body?: never; keyboard?: never; paymentOrderId?: never } |
-  { body: string; keyboard?: InlineKeyboardMarkup; paymentOrderId?: number; messageId?: never }
+  { messageId: number; stopPoll?: boolean; body?: never; keyboard?: never; paymentOrderId?: never; nativePollSummary?: never } |
+  { body: string; keyboard?: InlineKeyboardMarkup; paymentOrderId?: number; messageId?: never; stopPoll?: never; nativePollSummary?: never } |
+  { nativePollSummary: true; body?: never; keyboard?: never; paymentOrderId?: never; messageId?: never; stopPoll?: never }
 );
 
 const RETRY_MS = 5 * 60_000;
@@ -23,30 +26,64 @@ export function queueFoodCloseMessages(db: Db, scope: Scope, messages: readonly 
 
 /** Срочная рассылка забирает только свой заказ или опрос, тик подбирает остальные. */
 export async function deliverFoodCloseMessages(db: Db, bot: Bot, scope?: Scope): Promise<void> {
-  const pending = db.select({ id: foodCloseMessages.id }).from(foodCloseMessages)
-    .where(and(scope == null ? undefined : eq(foodCloseMessages.scope, scope), lte(foodCloseMessages.nextAttemptAt, Date.now())))
+  await deliverReadyMessages(db, bot, scope, false);
+  await deliverReadyMessages(db, bot, scope, true);
+}
+
+async function deliverReadyMessages(db: Db, bot: Bot, scope: Scope | undefined, nativePollSummary: boolean): Promise<void> {
+  const stopJob = alias(foodCloseMessages, "stop_job");
+  // Итог считаем после завершения всех stopPoll: Telegram может прислать
+  // окончательный голос в ответе на остановку, а не отдельным обновлением.
+  const ready = nativePollSummary ? notExists(db.select({ id: stopJob.id }).from(stopJob)
+    .where(and(eq(stopJob.scope, foodCloseMessages.scope), eq(stopJob.stopPoll, true)))) : undefined;
+  const pending = db.select({ id: foodCloseMessages.id, scope: foodCloseMessages.scope }).from(foodCloseMessages)
+    .where(and(
+      scope == null ? undefined : eq(foodCloseMessages.scope, scope),
+      eq(foodCloseMessages.nativePollSummary, nativePollSummary), lte(foodCloseMessages.nextAttemptAt, Date.now()), ready,
+    ))
     .orderBy(asc(foodCloseMessages.id))
     .limit(scope == null ? TICK_BATCH : -1)
     .all();
-  for (const { id } of pending) {
+  for (const { id, scope: messageScope } of pending) {
+    // У карточки в полёте ещё нет ID в базе. Останавливать уже известные
+    // карточки можно сразу, а общий итог дождётся последнего ответа sendPoll.
+    if (nativePollSummary && isTelegramPollSending(db, Number(messageScope.slice("poll:".length)))) continue;
     const now = Date.now();
     // Сдвигаем срок ДО запроса: тик и ручное закрытие могут проснуться вместе.
     // Если процесс остановился посреди отправки, запись восстановится по сроку.
     const message = db.update(foodCloseMessages).set({ nextAttemptAt: now + RETRY_MS })
-      .where(and(eq(foodCloseMessages.id, id), lte(foodCloseMessages.nextAttemptAt, now)))
+      .where(and(eq(foodCloseMessages.id, id), lte(foodCloseMessages.nextAttemptAt, now), ready))
       .returning().get();
     if (!message) continue;
+    if (message.awaitingPollSnapshot) {
+      // Telegram уже подтвердил закрытие. По истечении интервала не держим
+      // всю рассылку: без обновления итог будет помечен предварительным.
+      db.delete(foodCloseMessages).where(eq(foodCloseMessages.id, id)).run();
+      continue;
+    }
     const recipient = getEmployeeById(db, message.employeeId);
     const alreadyPaid = message.paymentOrderId != null && db.select({ id: foodOrderPayments.id }).from(foodOrderPayments)
       .where(and(eq(foodOrderPayments.orderId, message.paymentOrderId), eq(foodOrderPayments.employeeId, message.employeeId)))
       .get() != null;
-    if (!recipient?.isActive || recipient.telegramUserId !== message.telegramUserId || alreadyPaid) {
+    // Снять голосование надо и со старой личной карточки после отвязки
+    // аккаунта. stopPoll правит только уже отправленную ботом карточку.
+    if (!message.stopPoll && (!recipient?.isActive || recipient.telegramUserId !== message.telegramUserId || alreadyPaid)) {
       db.delete(foodCloseMessages).where(eq(foodCloseMessages.id, id)).run();
       continue;
     }
     try {
       if (message.messageId != null) {
-        await bot.api.editMessageReplyMarkup(message.telegramUserId, message.messageId, { reply_markup: new InlineKeyboard() });
+        if (message.stopPoll) {
+          const result = await bot.api.stopPoll(message.telegramUserId, message.messageId, { reply_markup: { inline_keyboard: [] } });
+          if (result?.is_closed && Array.isArray(result.options)) recordTelegramPollState(db, result);
+        } else {
+          await bot.api.editMessageReplyMarkup(message.telegramUserId, message.messageId, { reply_markup: new InlineKeyboard() });
+        }
+      } else if (message.nativePollSummary && message.scope.startsWith("poll:")) {
+        const poll = getPoll(db, Number(message.scope.slice("poll:".length)));
+        if (poll?.telegramOptions && poll.closedAt) {
+          await bot.api.sendMessage(message.telegramUserId, telegramPollResultText(db, poll), { protect_content: true });
+        }
       } else if (message.body != null) {
         await bot.api.sendMessage(message.telegramUserId, message.body, message.keyboard ? { reply_markup: message.keyboard } : undefined);
       }
@@ -60,7 +97,18 @@ export async function deliverFoodCloseMessages(db: Db, bot: Bot, scope?: Scope):
         console.warn(`food result delivery ${id} will retry:`, safeErrorMessage(error));
         continue;
       }
-      console.warn(`food result delivery ${id} refused:`, safeErrorMessage(error));
+      const alreadyClosed = message.stopPoll && error instanceof GrammyError
+        && /already[_ ]+closed|already been closed/i.test(error.description);
+      if (alreadyClosed) {
+        // На естественном закрытии ответ stopPoll может обогнать обновление
+        // poll. Дадим боту один интервал, чтобы получить точные результаты.
+        if (message.messageId != null && !hasTelegramPollFinalState(db, message.telegramUserId, message.messageId)) {
+          db.update(foodCloseMessages).set({ awaitingPollSnapshot: true }).where(eq(foodCloseMessages.id, id)).run();
+          continue;
+        }
+      } else {
+        console.warn(`food result delivery ${id} refused:`, safeErrorMessage(error));
+      }
     }
     db.delete(foodCloseMessages).where(eq(foodCloseMessages.id, id)).run();
   }

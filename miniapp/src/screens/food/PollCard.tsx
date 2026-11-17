@@ -18,7 +18,7 @@ export function PollCard({ poll: initial }: { poll: PollView }) {
    *  кнопки только по тексту «Опрос закрыт.», и отменённый опрос оставлял их
    *  активными до перезагрузки списка. Отказ перечитывания не страшен: прежняя
    *  карточка и текст ошибки остаются. */
-  async function attempt(action: () => Promise<void>) {
+  async function attempt(action: () => Promise<void>, reconcile = true) {
     setBusy(true);
     setError(null);
     // Строка «Напомнил: …» — итог прошлого нажатия; после нового действия она устарела.
@@ -27,10 +27,12 @@ export function PollCard({ poll: initial }: { poll: PollView }) {
       await action();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не получилось");
-      try {
-        setPoll(await apiClient.getPoll(poll.id));
-      } catch {
-        /* оставляем прежний `poll` — хотя бы текст ошибки виден */
+      if (reconcile) {
+        try {
+          setPoll(await apiClient.getPoll(poll.id));
+        } catch {
+          /* оставляем прежний `poll` — хотя бы текст ошибки виден */
+        }
       }
     } finally {
       setBusy(false);
@@ -42,11 +44,13 @@ export function PollCard({ poll: initial }: { poll: PollView }) {
   const remind = () => attempt(async () => setRemindResult(pollRemindResultText(await apiClient.remindPollSilent(poll.id))));
 
   const status = pollStatusLabel(poll);
+  const { telegram } = poll;
+  const refresh = () => attempt(async () => setPoll(await apiClient.getPoll(poll.id)), false);
   return (
     <Card>
       <div style={{ fontWeight: 600, fontSize: "var(--app-text-body)" }}>🗳 {poll.question}</div>
-      <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)" }}>{poll.creatorName} · {status}</div>
-      {poll.open && (
+      <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)" }}>{poll.creatorName} · {status}{telegram ? " · Telegram" : ""}</div>
+      {poll.open && !telegram && (
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           {POLL_CHOICES.map((choice) => (
             <ActionButton key={choice} compact kind={poll.myChoice === choice ? "primary" : "secondary"} aria-pressed={poll.myChoice === choice} disabled={busy}
@@ -54,9 +58,30 @@ export function PollCard({ poll: initial }: { poll: PollView }) {
           ))}
         </div>
       )}
-      <div style={{ fontSize: "var(--app-text-meta)" }}>
-        {pollTallyLines(poll.tally).map((line) => <div key={line}>{line}</div>)}
-      </div>
+      {telegram ? (
+        <>
+          {poll.open && <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)" }}>
+            {telegram.canVote ? "Проголосуй в личном чате с ботом." : "Опрос проходит в личном чате с ботом."}
+            {telegram.canVote && telegram.multiple && " Можно выбрать несколько вариантов."}
+          </div>}
+          <ul role="list" aria-label="Общий итог" style={{ display: "grid", gap: 6, margin: 0, padding: 0, listStyle: "none" }}>
+            {telegram.options.map(({ text, count }, index) => (
+              <li key={text} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 8, overflowWrap: "anywhere" }}>
+                <span>{text}{telegram.myOptionIds.includes(index) && <small style={{ color: "var(--tgui--hint_color)" }}> · Твой выбор</small>}</span>
+                <strong>{count}</strong>
+              </li>
+            ))}
+          </ul>
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+            <div role="status" style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)" }}>Ответили: {telegram.votedCount}</div>
+            {poll.open && <ActionButton compact kind="quiet" disabled={busy} onClick={refresh}>Обновить итог</ActionButton>}
+          </div>
+        </>
+      ) : (
+        <div style={{ fontSize: "var(--app-text-meta)" }}>
+          {pollTallyLines(poll.tally).map((line) => <div key={line}>{line}</div>)}
+        </div>
+      )}
       {canRemindSilent(poll) && (
         <ActionButton compact disabled={busy} onClick={remind}>🔔 Напомнить молчащим</ActionButton>
       )}

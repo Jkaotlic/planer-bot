@@ -30,6 +30,20 @@ const POLL: PollView = {
   tally: { for: [], against: [], abstain: [], silent: ["Игорь"] }, recipientCount: 2,
 };
 
+it("карточка Telegram показывает общий итог и предлагает голосовать в личном чате", async () => {
+  const telegram = { options: [{ text: "Парк", count: 2 }, { text: "Музей", count: 1 }], multiple: false, myOptionIds: [1], votedCount: 3, canVote: true };
+  const refresh = vi.spyOn(apiClient, "getPoll").mockResolvedValue({ ...POLL, telegram: { ...telegram, votedCount: 4 } });
+  const el = await mountCard({ ...POLL, telegram });
+  expect(el.textContent).toContain("Ответили: 3");
+  expect(el.textContent).toContain("Музей");
+  expect(el.textContent).toContain("Твой выбор");
+  expect(el.textContent).toContain("Проголосуй в личном чате с ботом");
+  expect(byText(el, "👍 За")).toBeUndefined();
+  await act(async () => byText(el, "Обновить итог")!.click());
+  expect(refresh).toHaveBeenCalledWith(POLL.id);
+  expect(el.textContent).toContain("Ответили: 4");
+});
+
 // Любой отказ — повод перечитать опрос, как делает `OrderScreen`: раньше
 // карточка гасила кнопки только по тексту «Опрос закрыт.», а отменённый или
 // удалённый опрос оставлял их висеть активными.

@@ -1,11 +1,28 @@
 import { and, desc, eq, gte, inArray, isNull, lte, isNotNull, or, sql } from "drizzle-orm";
-import { POLL_OPEN_MAX_DAYS, closesLabel, isOpenAt, pollTally, type PollChoice, type PollTally } from "@planer/shared";
+import {
+  POLL_OPEN_MAX_DAYS, closesLabel, isOpenAt, pollTally,
+  type PollChoice, type PollView, type TelegramPollConfig, type TelegramPollView,
+} from "@planer/shared";
 import type { Db } from "../db/client";
 import { employees, pollRecipients, pollVotes, polls, type Poll } from "../db/schema";
 
 export type Result = { ok: true } | { ok: false; error: string };
 export type TeamClock = { date: string; time: string };
 type Viewer = { id: number; isAdmin: boolean };
+
+const telegramPollsSending = new WeakMap<Db, Set<number>>();
+
+export function beginTelegramPollSending(db: Db, pollId: number): (() => void) | null {
+  const sending = telegramPollsSending.get(db) ?? new Set<number>();
+  if (sending.has(pollId)) return null;
+  sending.add(pollId);
+  telegramPollsSending.set(db, sending);
+  return () => { sending.delete(pollId); };
+}
+
+export function isTelegramPollSending(db: Db, pollId: number): boolean {
+  return telegramPollsSending.get(db)?.has(pollId) ?? false;
+}
 
 /**
  * Управлять опросом или заказом может тот, кто его запустил, — и админ.
@@ -20,10 +37,16 @@ export function canManage(owner: { createdBy: number }, viewer: Viewer): boolean
 
 export function createPoll(
   db: Db,
-  input: { createdBy: number; question: string; closesAt: string | null; recipientIds: number[] },
+  input: { createdBy: number; question: string; closesAt: string | null; recipientIds: number[]; telegram?: TelegramPollConfig },
 ): Poll {
   return db.transaction((tx) => {
-    const poll = tx.insert(polls).values({ createdBy: input.createdBy, question: input.question, closesAt: input.closesAt }).returning().get();
+    const poll = tx.insert(polls).values({
+      createdBy: input.createdBy,
+      question: input.question,
+      closesAt: input.closesAt,
+      telegramOptions: input.telegram?.options,
+      telegramMultiple: input.telegram?.multiple,
+    }).returning().get();
     for (const employeeId of input.recipientIds) {
       tx.insert(pollRecipients).values({ pollId: poll.id, employeeId }).onConflictDoNothing().run();
     }
@@ -64,6 +87,71 @@ export function setPollMessageId(db: Db, pollId: number, employeeId: number, mes
     .where(and(eq(pollRecipients.pollId, pollId), eq(pollRecipients.employeeId, employeeId))).run();
 }
 
+export function setTelegramPollMessage(
+  db: Db,
+  pollId: number,
+  employeeId: number,
+  message: { messageId: number; telegramPollId: string; telegramPollChatId: number },
+): void {
+  db.update(pollRecipients).set(message)
+    .where(and(eq(pollRecipients.pollId, pollId), eq(pollRecipients.employeeId, employeeId))).run();
+}
+
+/** Telegram присылает текущее состояние выбора целиком, в том числе пустое при отзыве. */
+export function recordTelegramPollAnswer(
+  db: Db, telegramPollId: string, telegramUserId: number, optionIds: readonly number[], now: TeamClock,
+): boolean {
+  const ballot = telegramBallot(db, telegramPollId);
+  if (!ballot?.poll.telegramOptions || ballot.finalized || ballot.chatId !== telegramUserId || !isOpenAt(ballot.poll, now)) return false;
+  const options = ballot.poll.telegramOptions;
+  const choices = [...new Set(optionIds)].sort((a, b) => a - b);
+  if ((!ballot.poll.telegramMultiple && choices.length > 1)
+      || choices.some((id) => !Number.isInteger(id) || id < 0 || id >= options.length)) return false;
+  saveTelegramChoices(db, telegramPollId, choices, false);
+  return true;
+}
+
+function telegramBallot(db: Db, telegramPollId: string) {
+  return db.select({ poll: polls, chatId: pollRecipients.telegramPollChatId, finalized: pollRecipients.telegramFinalized })
+    .from(pollRecipients)
+    .innerJoin(polls, eq(pollRecipients.pollId, polls.id))
+    .innerJoin(employees, eq(pollRecipients.employeeId, employees.id))
+    .where(and(
+      eq(pollRecipients.telegramPollId, telegramPollId),
+      eq(pollRecipients.telegramPollChatId, employees.telegramUserId),
+      eq(employees.isActive, true),
+    )).get();
+}
+
+function saveTelegramChoices(db: Db, telegramPollId: string, choices: number[], finalized: boolean): void {
+  db.update(pollRecipients).set({ telegramChoices: choices, telegramFinalized: finalized })
+    .where(eq(pollRecipients.telegramPollId, telegramPollId)).run();
+}
+
+/** У PollAnswer нет времени голоса. При закрытии берём окончательное состояние личной карточки. */
+export function recordTelegramPollState(db: Db, snapshot: {
+  id: string;
+  is_closed: boolean;
+  total_voter_count: number;
+  options: readonly { text: string; voter_count: number }[];
+}): boolean {
+  if (!snapshot.is_closed || (snapshot.total_voter_count !== 0 && snapshot.total_voter_count !== 1)) return false;
+  const ballot = telegramBallot(db, snapshot.id);
+  const options = ballot?.poll.telegramOptions;
+  if (!options || ballot.poll.cancelledAt != null || options.length !== snapshot.options.length) return false;
+  if (snapshot.options.some(({ text, voter_count }, index) => text !== options[index] || (voter_count !== 0 && voter_count !== 1))) return false;
+  const choices = snapshot.options.flatMap(({ voter_count }, index) => voter_count === 1 ? [index] : []);
+  if (Number(choices.length > 0) !== snapshot.total_voter_count || (!ballot.poll.telegramMultiple && choices.length > 1)) return false;
+  saveTelegramChoices(db, snapshot.id, choices, true);
+  return true;
+}
+
+export function hasTelegramPollFinalState(db: Db, chatId: number, messageId: number): boolean {
+  return db.select({ finalized: pollRecipients.telegramFinalized }).from(pollRecipients)
+    .where(and(eq(pollRecipients.telegramPollChatId, chatId), eq(pollRecipients.messageId, messageId)))
+    .get()?.finalized === true;
+}
+
 export function getPoll(db: Db, id: number): Poll | undefined {
   return db.select().from(polls).where(eq(polls.id, id)).get();
 }
@@ -83,6 +171,10 @@ export function pollRecipientRows(db: Db, pollId: number) {
       displayName: employees.displayName,
       telegramUserId: employees.telegramUserId,
       messageId: pollRecipients.messageId,
+      telegramPollId: pollRecipients.telegramPollId,
+      telegramPollChatId: pollRecipients.telegramPollChatId,
+      telegramChoices: pollRecipients.telegramChoices,
+      telegramFinalized: pollRecipients.telegramFinalized,
     })
     .from(pollRecipients)
     .innerJoin(employees, eq(employees.id, pollRecipients.employeeId))
@@ -109,6 +201,7 @@ export function voteOf(db: Db, pollId: number, employeeId: number): PollChoice |
 export function castVote(db: Db, poll: Poll, employeeId: number, choice: PollChoice, now: TeamClock): Result {
   if (!isOpenAt(poll, now)) return { ok: false, error: "Опрос закрыт." };
   if (!isPollRecipient(db, poll.id, employeeId)) return { ok: false, error: "Этот опрос тебе не приходил." };
+  if (poll.telegramOptions) return { ok: false, error: "Проголосуй в опросе в чате с ботом." };
   db.insert(pollVotes).values({ pollId: poll.id, employeeId, choice })
     .onConflictDoUpdate({ target: [pollVotes.pollId, pollVotes.employeeId], set: { choice, votedAt: new Date() } })
     .run();
@@ -159,20 +252,50 @@ export function closeDuePolls(db: Db, now: TeamClock, at: Date = new Date()): Po
   return due.filter((p) => finish(db, p.id, "closedAt"));
 }
 
-export interface PollView {
-  id: number;
-  question: string;
-  creatorId: number;
-  creatorName: string;
-  closesAt: string | null;
-  closes: string | null;
-  open: boolean;
-  cancelled: boolean;
-  isCreator: boolean;
-  canManage: boolean;
-  myChoice: PollChoice | null;
-  tally: PollTally;
-  recipientCount: number;
+export type { PollView } from "@planer/shared";
+
+type PollRecipientRow = ReturnType<typeof pollRecipientRows>[number];
+
+function hasCurrentTelegramBallot(row: PollRecipientRow): boolean {
+  return row.telegramPollId != null && row.telegramPollChatId === row.telegramUserId;
+}
+
+function hasTelegramVote(row: PollRecipientRow): boolean {
+  return hasCurrentTelegramBallot(row) && (row.telegramChoices?.length ?? 0) > 0;
+}
+
+function summarizeTelegramPoll(poll: Poll, recipients: readonly PollRecipientRow[], viewerId?: number): TelegramPollView {
+  const options = (poll.telegramOptions ?? []).map((text) => ({ text, count: 0 }));
+  const submitted = recipients.filter(hasTelegramVote);
+  for (const row of submitted) {
+    for (const choice of row.telegramChoices ?? []) {
+      const option = options[choice];
+      if (option) option.count += 1;
+    }
+  }
+  const mine = recipients.find((row) => row.employeeId === viewerId && hasCurrentTelegramBallot(row));
+  return {
+    options, multiple: poll.telegramMultiple, myOptionIds: mine?.telegramChoices ?? [],
+    votedCount: submitted.length, canVote: mine != null,
+  };
+}
+
+export function telegramPollSummary(db: Db, poll: Poll, viewerId?: number): TelegramPollView {
+  return summarizeTelegramPoll(poll, pollRecipientRows(db, poll.id), viewerId);
+}
+
+export function telegramPollResultText(db: Db, poll: Poll): string {
+  const recipients = pollRecipientRows(db, poll.id);
+  const { options, votedCount } = summarizeTelegramPoll(poll, recipients);
+  const waiting = poll.closedAt && recipients.some((row) => hasCurrentTelegramBallot(row) && !row.telegramFinalized);
+  return [
+    `📊 ${waiting ? "Предварительный итог" : "Итоги опроса"}: ${poll.question}`,
+    "",
+    ...options.map(({ text, count }) => `• ${text} — ${count}`),
+    "",
+    `Ответили: ${votedCount}`,
+    ...(waiting ? ["", "Telegram ещё не подтвердил часть голосов. Общий итог можно обновить в приложении."] : []),
+  ].join("\n");
 }
 
 /**
@@ -183,10 +306,12 @@ export function pollView(db: Db, poll: Poll, viewer: Viewer, now: TeamClock): Po
   const recipients = pollRecipientRows(db, poll.id);
   const manage = canManage(poll, viewer);
   if (!manage && !recipients.some((r) => r.employeeId === viewer.id)) return null;
-  const votes = db.select({ employeeId: pollVotes.employeeId, choice: pollVotes.choice })
+  const telegram = poll.telegramOptions ? summarizeTelegramPoll(poll, recipients, viewer.id) : null;
+  const votes = telegram ? [] : db.select({ employeeId: pollVotes.employeeId, choice: pollVotes.choice })
     .from(pollVotes).where(eq(pollVotes.pollId, poll.id)).all();
   const creatorName = db.select({ name: employees.displayName }).from(employees)
     .where(eq(employees.id, poll.createdBy)).get()?.name ?? "—";
+  const open = isOpenAt(poll, now);
   return {
     id: poll.id,
     question: poll.question,
@@ -194,13 +319,14 @@ export function pollView(db: Db, poll: Poll, viewer: Viewer, now: TeamClock): Po
     creatorName,
     closesAt: poll.closesAt,
     closes: closesLabel(poll.closesAt, now.date),
-    open: isOpenAt(poll, now),
+    open,
     cancelled: poll.cancelledAt != null,
     isCreator: poll.createdBy === viewer.id,
     canManage: manage,
     myChoice: votes.find((v) => v.employeeId === viewer.id)?.choice ?? null,
-    tally: pollTally(recipients, votes),
+    tally: pollTally(telegram ? recipients.filter((row) => !hasTelegramVote(row)) : recipients, votes),
     recipientCount: recipients.length,
+    ...(telegram ? { telegram: { ...telegram, canVote: open && telegram.canVote } } : {}),
   };
 }
 

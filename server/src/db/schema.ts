@@ -803,7 +803,7 @@ export type CollectionPayment = typeof collectionPayments.$inferSelect;
 export type NewCollectionPayment = typeof collectionPayments.$inferInsert;
 
 /**
- * Опрос «За / Против / Воздержался», который запускает любой работник.
+ * Быстрый или встроенный опрос Telegram, который запускает любой работник.
  *
  * `closesAt` — строка командного времени `YYYY-MM-DDTHH:MM`, а не момент UTC:
  * её сравнивают строкой с `teamNow`, и граница «до 12:30» не должна зависеть
@@ -813,6 +813,8 @@ export const polls = sqliteTable("polls", {
   id: integer().primaryKey({ autoIncrement: true }),
   createdBy: integer().notNull().references(() => employees.id),
   question: text().notNull(),
+  telegramOptions: text({ mode: "json" }).$type<string[]>(),
+  telegramMultiple: integer({ mode: "boolean" }).notNull().default(false),
   closesAt: text(),
   closedAt: integer({ mode: "timestamp" }),
   cancelledAt: integer({ mode: "timestamp" }),
@@ -832,8 +834,12 @@ export const pollRecipients = sqliteTable(
     pollId: integer().notNull().references(() => polls.id),
     employeeId: integer().notNull().references(() => employees.id),
     messageId: integer(),
+    telegramPollId: text(),
+    telegramPollChatId: integer(),
+    telegramChoices: text({ mode: "json" }).$type<number[]>(),
+    telegramFinalized: integer({ mode: "boolean" }).notNull().default(false),
   },
-  (t) => [primaryKey({ columns: [t.pollId, t.employeeId] })],
+  (t) => [primaryKey({ columns: [t.pollId, t.employeeId] }), uniqueIndex("poll_recipient_telegram_poll").on(t.telegramPollId)],
 );
 
 /** Голос. Один на человека: переголосование — перезапись, а не вторая строка. */
@@ -953,6 +959,9 @@ export const foodCloseMessages = sqliteTable("food_close_messages", {
   employeeId: integer().notNull().references(() => employees.id),
   telegramUserId: integer().notNull(),
   messageId: integer(),
+  stopPoll: integer({ mode: "boolean" }).notNull().default(false),
+  nativePollSummary: integer({ mode: "boolean" }).notNull().default(false),
+  awaitingPollSnapshot: integer({ mode: "boolean" }).notNull().default(false),
   body: text(),
   keyboard: text({ mode: "json" }).$type<InlineKeyboardMarkup>(),
   paymentOrderId: integer().references(() => foodOrders.id),

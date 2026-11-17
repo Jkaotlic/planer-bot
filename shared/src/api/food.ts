@@ -1,6 +1,7 @@
 import type { FoodDishShape, FoodMenuItemShape } from "../food-order";
 import type { PaymentRow } from "../collection-payment";
-import type { PollChoice, PollTally } from "../poll";
+import type { PollChoice, PollTally, TelegramPollConfig } from "../poll";
+import type { TeamAudience } from "../team-audience";
 
 /**
  * Ответы ручек заказов, опросов и мест — глазами того, кто открыл экран.
@@ -28,6 +29,22 @@ export interface PollView {
   myChoice: PollChoice | null;
   tally: PollTally;
   recipientCount: number;
+  telegram?: TelegramPollView;
+}
+
+export interface CreatePollInput {
+  question: string;
+  closesTime: string | null;
+  audience: TeamAudience;
+  telegram?: TelegramPollConfig;
+}
+
+export interface TelegramPollView {
+  options: { text: string; count: number }[];
+  multiple: boolean;
+  myOptionIds: number[];
+  votedCount: number;
+  canVote: boolean;
 }
 
 /** Место с меню — общее для всей команды, как и опрос. */

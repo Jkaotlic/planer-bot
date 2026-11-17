@@ -328,6 +328,35 @@ export async function browserScenarios() {
       await ctx.close();
     }
   });
+  await check("мини-апп на 320px: создать опрос Telegram и увидеть общий итог", async () => {
+    const ctx = await mob(320);
+    try {
+      const page = await ctx.newPage();
+      const url = new URL(miniUrl(W1));
+      url.searchParams.set("screen", "orders");
+      await page.goto(url.href);
+      await page.getByRole("button", { name: /Новый опрос/ }).click();
+      await page.getByRole("button", { name: "Опрос Telegram", exact: true }).click();
+      await page.getByPlaceholder("Корпоратив в пятницу?").fill("Что взять на встречу?");
+      await page.getByRole("textbox", { name: "Вариант 1", exact: true }).fill("Салат");
+      await page.getByRole("textbox", { name: "Вариант 2", exact: true }).fill("Суп");
+      await page.getByRole("button", { name: "Добавить вариант" }).click();
+      await page.getByRole("textbox", { name: "Вариант 3", exact: true }).fill("Паста");
+      await page.getByRole("checkbox", { name: "Можно выбрать несколько вариантов" }).check();
+      await page.getByRole("button", { name: "Выбрать", exact: true }).click();
+      await page.getByRole("checkbox", { name: /Марк/ }).check();
+      const layout = await overflow(page);
+      assert(layout.sw === layout.w, "форма шире экрана: " + JSON.stringify(layout));
+      await page.screenshot({ path: resolve(shots, "native-poll-form.png") });
+      await page.getByRole("button", { name: "Отправить", exact: true }).click();
+      const tally = page.getByRole("list", { name: "Общий итог" }).filter({ hasText: "Салат" });
+      await tally.getByText("Паста", { exact: true }).waitFor();
+      const sent = tg.calls.filter((call) => call.method === "sendPoll" && call.body.question === "Что взять на встречу?");
+      assert(sent.length === 2 && sent.some((call) => call.body.chat_id === W2.id), "опрос не пришёл выбранному коллеге");
+    } finally {
+      await ctx.close();
+    }
+  });
   await check("СТАРЫЙ клиент Telegram (initData без signature), светлая тема: экраны читаемы", async () => {
     SIGN = false;
     const { ctx, issues, out } = await crawlMini(W1, "oldclient");

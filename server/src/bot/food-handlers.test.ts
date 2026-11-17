@@ -6,7 +6,7 @@ import { recordApi, stubBotInfo } from "./testbot";
 import { BTN_SERVICES, LEGACY_BTN_FOOD } from "./keyboard";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount } from "../repo/employees";
-import { cancelPoll, castVote, closePoll, createPoll, getPoll, voteOf } from "../polls/poll-service";
+import { cancelPoll, castVote, closePoll, createPoll, getPoll, setTelegramPollMessage, voteOf } from "../polls/poll-service";
 import { createPlace } from "../orders/place-service";
 import { addCustomItem, addMenuItem, cancelOrder, closeOrder, createOrder, getOrder, itemsOf } from "../orders/order-service";
 import { orderPayments } from "../orders/order-payment-service";
@@ -141,6 +141,54 @@ describe("кнопка «🧰 Сервисы»", () => {
 });
 
 describe("колбэки опроса", () => {
+  it("принимает окончательный итог Telegram для карточки уже закрытого опроса", async () => {
+    const { bot, db, anya, igor } = stage();
+    const poll = createPoll(db, {
+      createdBy: anya.id, question: "Когда?", closesAt: null, recipientIds: [anya.id, igor.id],
+      telegram: { options: ["Сегодня", "Завтра"], multiple: false },
+    });
+    setTelegramPollMessage(db, poll.id, igor.id, { messageId: 100, telegramPollId: "igor-poll", telegramPollChatId: 333 });
+    expect(closePoll(db, poll, anya)).toEqual({ ok: true });
+    await bot.handleUpdate({
+      update_id: updateId++,
+      poll: {
+        id: "igor-poll", is_closed: true, total_voter_count: 1,
+        options: [{ text: "Сегодня", voter_count: 0 }, { text: "Завтра", voter_count: 1 }],
+      },
+    } as never);
+    const api = recordApi(bot);
+    await tap(bot, 333, `poll:r:${poll.id}`);
+    expect(api.sent.at(-1)?.text).toContain("Сегодня — 0\n• Завтра — 1");
+  });
+
+  it("принимает обновления Telegram только от получателя конкретной карточки, включая отзыв", async () => {
+    const { bot, db, anya, igor } = stage();
+    const poll = createPoll(db, {
+      createdBy: anya.id, question: "Когда?", closesAt: null, recipientIds: [anya.id, igor.id],
+      telegram: { options: ["Сегодня", "Завтра"], multiple: true },
+    });
+    setTelegramPollMessage(db, poll.id, igor.id, { messageId: 100, telegramPollId: "igor-poll", telegramPollChatId: 333 });
+    const api = recordApi(bot);
+    const vote = (optionIds: number[], userId?: number) => bot.handleUpdate({
+      update_id: updateId++,
+      poll_answer: { poll_id: "igor-poll", option_ids: optionIds, option_persistent_ids: optionIds.map(String), ...(userId == null
+        ? { voter_chat: { id: 333, type: "private", first_name: "Т" } }
+        : { user: { id: userId, is_bot: false, first_name: "Т" } }) },
+    });
+
+    await vote([0, 1], 333);
+    await vote([0], 444);
+    await vote([0]);
+    await tap(bot, 333, `poll:r:${poll.id}`);
+    expect(api.sent.at(-1)?.text).toContain("Сегодня — 1\n• Завтра — 1");
+    await vote([1], 333);
+    await tap(bot, 333, `poll:r:${poll.id}`);
+    expect(api.sent.at(-1)?.text).toContain("Сегодня — 0\n• Завтра — 1");
+    await vote([], 333);
+    await tap(bot, 333, `poll:r:${poll.id}`);
+    expect(api.sent.at(-1)?.text).toContain("Ответили: 0");
+  });
+
   it("голос ставится, письмо перерисовывается с отметкой", async () => {
     const { db, bot, igor, poll } = stage();
     const api = recordApi(bot);

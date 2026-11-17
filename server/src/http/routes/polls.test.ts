@@ -1,14 +1,16 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import type { Bot } from "grammy";
+import { GrammyError, type Bot } from "grammy";
 import { createApp } from "../app";
 import { makeTestDb } from "../../db/testdb";
-import { createEmployee, linkTelegramAccount } from "../../repo/employees";
+import { archiveEmployee, createEmployee, linkTelegramAccount } from "../../repo/employees";
 import { signInitData } from "../../auth/telegram";
 import { testConfig } from "../../test-config";
 import type { Db } from "../../db/client";
 import { eq, sql } from "drizzle-orm";
 import { employees, polls } from "../../db/schema";
 import { listRecentAudit } from "../../repo/audit";
+import { runFoodTick } from "../../food/food-tick";
+import { recordTelegramPollState } from "../../polls/poll-service";
 
 function fakeBot() {
   const sent: { to: number; text: string; id: number }[] = [];
@@ -27,6 +29,13 @@ function fakeBot() {
         sent.push({ to, text, id });
         return { message_id: id };
       }),
+      sendPoll: vi.fn(async (to: number) => {
+        if (gate) { waiting += 1; await gate; }
+        if (failFor.has(to)) throw new Error("Forbidden: bot was blocked by the user");
+        const id = nextId++;
+        return { message_id: id, chat: { id: to, type: "private" }, poll: { id: `native-${id}` } };
+      }),
+      stopPoll: vi.fn(async () => ({})),
       editMessageReplyMarkup: vi.fn(async () => ({})),
       editMessageText: vi.fn(async () => ({})),
     },
@@ -67,10 +76,197 @@ async function stage() {
   const anya = person(db, "Аня", 100);
   const igor = person(db, "Игорь", 101);
   person(db, "Марк", 102);
-  return { db, app, sent, failFor, hold, api, anya, igor, anyaT: await tokenFor(app, 100), igorT: await tokenFor(app, 101), markT: await tokenFor(app, 102) };
+  return { db, app, bot, sent, failFor, hold, api, anya, igor, anyaT: await tokenFor(app, 100), igorT: await tokenFor(app, 101), markT: await tokenFor(app, 102) };
 }
 
 describe("опросы по HTTP", () => {
+  it("рассылает защищённые личные опросы Telegram с общим сроком и прекращает голосование при закрытии", async () => {
+    const { app, api, igor, anyaT, igorT } = await stage();
+    const res = await app.request(new Request("http://x/api/polls", send(anyaT, {
+      question: "Какой день?", closesTime: "18:00", audience: { kind: "picked", employeeIds: [igor] },
+      telegram: { options: ["Пятница", "Суббота"], multiple: true },
+    })));
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.delivered).toBe(1);
+    expect(api.sendMessage).not.toHaveBeenCalled();
+    expect(api.sendPoll.mock.calls).toEqual([100, 101].map(to => [
+      to, "Какой день?", [{ text: "Пятница" }, { text: "Суббота" }], expect.objectContaining({
+        type: "regular", is_anonymous: false, allows_multiple_answers: true, protect_content: true,
+        allows_revoting: true, close_date: Date.parse("2026-09-29T15:00:00Z") / 1000,
+      }),
+    ]));
+
+    const vote = await app.request(new Request(`http://x/api/polls/${body.poll.id}/vote`, send(igorT, { choice: "for" })));
+    expect(vote.status).toBe(409);
+    const reminder = await app.request(new Request(`http://x/api/polls/${body.poll.id}/remind`, send(anyaT, {})));
+    expect(reminder.status).toBe(200);
+    expect(api.sendPoll).toHaveBeenCalledTimes(2);
+    expect(api.sendMessage).toHaveBeenCalledWith(101, expect.stringContaining("опрос"), expect.objectContaining({
+      reply_parameters: { message_id: 2 }, protect_content: true,
+    }));
+
+    const close = await app.request(new Request(`http://x/api/polls/${body.poll.id}/close`, send(anyaT, {})));
+    expect(close.status).toBe(200);
+    expect(api.stopPoll.mock.calls).toEqual([[100, 1], [101, 2]].map(([chat, message]) => [
+      chat, message, { reply_markup: { inline_keyboard: [] } },
+    ]));
+    expect(api.sendMessage).toHaveBeenCalledWith(101, expect.stringContaining("Пятница"), { protect_content: true });
+  });
+
+  it("разрешает вопрос из 300 символов только в опросе Telegram", async () => {
+    const { app, api, igor, anyaT } = await stage();
+    const question = "Я".repeat(300);
+    const body = { question, closesTime: "18:00", audience: { kind: "picked", employeeIds: [igor] } };
+    expect((await app.request("/api/polls", send(anyaT, body))).status).toBe(400);
+    expect((await app.request("/api/polls", send(anyaT, {
+      ...body, telegram: { options: ["Один", "Два"], multiple: false },
+    }))).status).toBe(201);
+    expect(api.sendPoll).toHaveBeenCalledTimes(2);
+  });
+
+  it("не открывает карточки на больший срок, если до закрытия осталось меньше минимального интервала", async () => {
+    vi.setSystemTime(new Date("2026-09-29T14:59:54Z"));
+    const { app, api, igor, anyaT } = await stage();
+    const response = await app.request("/api/polls", send(anyaT, {
+      question: "Дежурство?", closesTime: "18:00", audience: { kind: "picked", employeeIds: [igor] },
+      telegram: { options: ["Один", "Два"], multiple: false },
+    }));
+    expect(response.status).toBe(201);
+    expect(await response.json()).toMatchObject({ delivered: 0, deliveredToNobody: true });
+    expect(api.sendPoll).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false])("ждёт состояние закрытой по сроку карточки один тик (пришло: %s)", async (snapshotArrived) => {
+    const { db, app, api, bot, igor, anyaT } = await stage();
+    const response = await app.request("/api/polls", send(anyaT, {
+      question: "Дежурство?", closesTime: "12:01", audience: { kind: "picked", employeeIds: [igor] },
+      telegram: { options: ["Один", "Два"], multiple: false },
+    }));
+    expect(response.status).toBe(201);
+    api.stopPoll.mockResolvedValueOnce({
+      id: "native-1", is_closed: true, total_voter_count: 0,
+      options: [{ text: "Один", voter_count: 0 }, { text: "Два", voter_count: 0 }],
+    }).mockRejectedValueOnce(new GrammyError("Stop failed", {
+      ok: false, error_code: 400, description: "Bad Request: poll has already been closed",
+    }, "stopPoll", { chat_id: 101, message_id: 2 }));
+
+    vi.setSystemTime(new Date("2026-09-29T09:01:00Z"));
+    expect(await runFoodTick(db, bot, { date: "2026-09-29", time: "12:01" })).toBe(1);
+    expect(api.sendMessage).not.toHaveBeenCalled();
+    if (snapshotArrived) {
+      expect(recordTelegramPollState(db, {
+        id: "native-2", is_closed: true, total_voter_count: 1,
+        options: [{ text: "Один", voter_count: 0 }, { text: "Два", voter_count: 1 }],
+      })).toBe(true);
+    }
+
+    vi.setSystemTime(new Date("2026-09-29T09:06:00Z"));
+    expect(await runFoodTick(db, bot, { date: "2026-09-29", time: "12:06" })).toBe(0);
+    expect(api.stopPoll).toHaveBeenCalledTimes(2);
+    expect(api.sendMessage.mock.calls.map(([chat]) => chat)).toEqual([100, 101]);
+    const body = api.sendMessage.mock.calls[0]?.[1];
+    expect(body).toContain(`Один — 0\n• Два — ${snapshotArrived ? 1 : 0}`);
+    expect(body?.includes("Предварительный")).toBe(!snapshotArrived);
+  });
+
+  it("показывает имя коллеги, которому Telegram не доставил опрос", async () => {
+    const { app, failFor, anyaT } = await stage();
+    failFor.add(101);
+    const response = await app.request("/api/polls", send(anyaT, {
+      question: "Дежурство?", closesTime: null, audience: { kind: "team" },
+      telegram: { options: ["Один", "Два"], multiple: false },
+    }));
+    expect(response.status).toBe(201);
+    expect(await response.json()).toMatchObject({ delivered: 1, unreachable: ["Игорь"], deliveredToNobody: false });
+  });
+
+  it("пробует остановить и карточку ушедшего работника, а после сбоя повторяет только отказ", async () => {
+    const { db, app, api, bot, igor, anyaT } = await stage();
+    const response = await app.request("/api/polls", send(anyaT, {
+      question: "Дежурство?", closesTime: null, audience: { kind: "picked", employeeIds: [igor] },
+      telegram: { options: ["Один", "Два"], multiple: false },
+    }));
+    expect(response.status).toBe(201);
+    const { poll } = await response.json();
+    archiveEmployee(db, igor, "2026-09-29");
+    api.stopPoll.mockRejectedValueOnce(new Error("ECONNRESET"));
+    expect((await app.request(`/api/polls/${poll.id}/close`, send(anyaT, {}))).status).toBe(200);
+    expect(api.stopPoll.mock.calls).toHaveLength(2);
+    expect(api.sendMessage).not.toHaveBeenCalled();
+    vi.setSystemTime(new Date("2026-09-29T09:05:01Z"));
+    api.stopPoll.mockResolvedValueOnce({
+      id: "native-1", is_closed: true, total_voter_count: 1,
+      options: [{ text: "Один", voter_count: 0 }, { text: "Два", voter_count: 1 }],
+    });
+    await runFoodTick(db, bot, { date: "2026-09-29", time: "12:05" });
+    expect(api.stopPoll.mock.calls.map(call => call.slice(0, 2))).toEqual([[100, 1], [101, 2], [100, 1]]);
+    expect(api.sendMessage.mock.calls.map(([chat]) => chat)).toEqual([100]);
+    expect(api.sendMessage.mock.calls[0]?.[1]).toContain("Один — 0\n• Два — 1");
+  });
+
+  it("закрывает опоздавшую карточку и прекращает веер, когда закрыли во время первой отправки", async () => {
+    const { db, app, api, hold, igor, anyaT } = await stage();
+    const gate = hold();
+    const launched = app.request("/api/polls", send(anyaT, {
+      question: "Дежурство?", closesTime: "18:00", audience: { kind: "picked", employeeIds: [igor] },
+      telegram: { options: ["Один", "Два"], multiple: false },
+    }));
+    await vi.waitFor(() => expect(gate.waiting()).toBe(1));
+    const poll = db.select().from(polls).get()!;
+    try {
+      expect((await app.request(`/api/polls/${poll.id}/close`, send(anyaT, {}))).status).toBe(200);
+    } finally {
+      gate.release();
+    }
+    const response = await launched;
+    expect(response.status).toBe(201);
+    expect(await response.json()).toMatchObject({ poll: { open: false }, delivered: 0 });
+    expect(api.sendPoll).toHaveBeenCalledTimes(1);
+    expect(api.stopPoll.mock.calls.map(call => call.slice(0, 2))).toEqual([[100, 1]]);
+    expect(api.sendMessage.mock.calls.map(([chat]) => chat)).toEqual([100]);
+  });
+
+  it("после закрытия во время второй отправки ждёт её ответ и рассылает один итог обоим", async () => {
+    const { db, app, api, igor, anyaT } = await stage();
+    let release!: () => void;
+    const secondDelivery = new Promise<void>(resolve => { release = resolve; });
+    const originalSend = api.sendPoll.getMockImplementation()!;
+    api.sendPoll.mockImplementationOnce(originalSend).mockImplementationOnce(async (chat) => {
+      await secondDelivery;
+      return originalSend(chat);
+    });
+    api.stopPoll.mockResolvedValueOnce({
+      id: "native-1", is_closed: true, total_voter_count: 0,
+      options: [{ text: "Один", voter_count: 0 }, { text: "Два", voter_count: 0 }],
+    }).mockResolvedValueOnce({
+      id: "native-2", is_closed: true, total_voter_count: 1,
+      options: [{ text: "Один", voter_count: 0 }, { text: "Два", voter_count: 1 }],
+    });
+
+    const launched = app.request("/api/polls", send(anyaT, {
+      question: "Дежурство?", closesTime: "18:00", audience: { kind: "picked", employeeIds: [igor] },
+      telegram: { options: ["Один", "Два"], multiple: false },
+    }));
+    try {
+      await vi.waitFor(() => expect(api.sendPoll).toHaveBeenCalledTimes(2));
+      const poll = db.select().from(polls).get()!;
+      expect((await app.request(`/api/polls/${poll.id}/close`, send(anyaT, {}))).status).toBe(200);
+      expect(api.stopPoll.mock.calls.map(call => call.slice(0, 2))).toEqual([[100, 1]]);
+      expect(api.sendMessage).not.toHaveBeenCalled();
+    } finally {
+      release();
+    }
+
+    const response = await launched;
+    expect(await response.json()).toMatchObject({ poll: { open: false }, delivered: 1 });
+    expect(api.stopPoll.mock.calls.map(call => call.slice(0, 2))).toEqual([[100, 1], [101, 2]]);
+    expect(api.sendMessage.mock.calls.map(([chat]) => chat)).toEqual([100, 101]);
+    const [first, second] = api.sendMessage.mock.calls.map(([, text]) => text);
+    expect(first).toContain("Один — 0\n• Два — 1");
+    expect(second).toBe(first);
+  });
+
   it("работник создаёт опрос вручную выбранным — письма уходят ему и адресату", async () => {
     const { app, sent, igor, anyaT } = await stage();
     const res = await app.request(new Request("http://x/api/polls",

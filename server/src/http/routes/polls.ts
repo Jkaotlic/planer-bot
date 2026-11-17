@@ -1,7 +1,10 @@
 import { Hono } from "hono";
 import type { Bot } from "grammy";
 import { z } from "zod";
-import { POLL_QUESTION_MAX, closesAtFromTime, isOpenAt, pollChoiceSchema, teamAudienceSchema, timeStr } from "@planer/shared";
+import {
+  POLL_QUESTION_MAX, POLL_TELEGRAM_QUESTION_MAX, closesAtFromTime, isOpenAt, pollChoiceSchema,
+  teamAudienceSchema, telegramPollConfigSchema, timeStr,
+} from "@planer/shared";
 import type { Config } from "../../config";
 import type { Db } from "../../db/client";
 import { recordAudit } from "../../repo/audit";
@@ -20,10 +23,13 @@ import { deliverFoodCloseMessages } from "../../food/food-close-delivery";
 const NOT_FOUND = "Опрос не найден.";
 
 const createSchema = z.object({
-  question: z.string().trim().min(1).max(POLL_QUESTION_MAX),
+  question: z.string().trim().min(1).max(POLL_TELEGRAM_QUESTION_MAX),
   closesTime: timeStr.nullable(),
   audience: teamAudienceSchema,
-}).strict();
+  telegram: telegramPollConfigSchema.optional(),
+}).strict().refine((input) => input.telegram != null || input.question.length <= POLL_QUESTION_MAX, {
+  path: ["question"], message: `Вопрос быстрого опроса должен быть не длиннее ${POLL_QUESTION_MAX} символов.`,
+});
 
 /**
  * Опросы. Запускает любой работник — так он решил (2026-09-29): «кто со мной
@@ -56,7 +62,12 @@ export function createPollRoutes(deps: { db: Db; config: Config; bot?: Bot }): H
 
   app.post("/api/polls", auth, async (c) => {
     const parsed = createSchema.safeParse(await jsonBody(c));
-    if (!parsed.success) return c.json({ error: "Проверь вопрос, время и адресатов.", issues: parsed.error.issues }, 400);
+    if (!parsed.success) {
+      const error = parsed.error.issues.some(({ path }) => path[0] === "telegram")
+        ? "Укажи разные варианты ответа для опроса Telegram."
+        : "Проверь вопрос, время и адресатов.";
+      return c.json({ error, issues: parsed.error.issues }, 400);
+    }
     const now = teamNow(config.teamTz);
     // Время, которое сегодня уже прошло, — завтрашнее (`closesAtFromTime`): срок
     // всегда впереди, и опрос не может родиться закрытым. Поэтому отказа «время
@@ -82,8 +93,9 @@ export function createPollRoutes(deps: { db: Db; config: Config; bot?: Bot }): H
         question: parsed.data.question,
         closesAt,
         recipientIds: reachable.map((e) => e.id),
+        telegram: parsed.data.telegram,
       });
-      delivered = await sendPollInvites(bot, db, poll, now);
+      delivered = await sendPollInvites(bot, db, poll, now, config.teamTz);
     } finally {
       inFlight.delete(key);
     }
@@ -92,11 +104,22 @@ export function createPollRoutes(deps: { db: Db; config: Config; bot?: Bot }): H
     // соберёт, и «Отправлено коллегам: N» с ним было бы на одного больше. Журнал выше
     // хранит все письма — его `recipients` тоже считает создателя.
     const colleagues = pollRecipientRows(db, poll.id).filter((r) => r.employeeId !== viewer.id);
-    const deliveredToColleagues = colleagues.filter((r) => r.messageId != null).length;
+    const received = new Set(colleagues.filter((r) =>
+      r.messageId != null && r.telegramPollId != null && r.telegramPollChatId === r.telegramUserId).map(r => r.employeeId));
+    const deliveredToColleagues = poll.telegramOptions == null
+      ? colleagues.filter((r) => r.messageId != null).length
+      : received.size;
+    const deliveryFailures = poll.telegramOptions == null ? unreachable : [...new Set([
+      ...unreachable,
+      ...reachable.filter(r => r.id !== viewer.id && !received.has(r.id)).map(r => r.displayName),
+    ])];
     // Не дошло ни до кого из коллег — опрос всё равно остаётся (он в базе и виден в
     // мини-аппе, как сбор), но форма должна сказать это прямо, а не «Опрос отправлен».
     const deliveredToNobody = colleagues.length > 0 && deliveredToColleagues === 0;
-    return c.json({ poll: pollView(db, poll, viewer, now), delivered: deliveredToColleagues, unreachable, deliveredToNobody }, 201);
+    return c.json({
+      poll: pollView(db, getPoll(db, poll.id) ?? poll, viewer, now),
+      delivered: deliveredToColleagues, unreachable: deliveryFailures, deliveredToNobody,
+    }, 201);
   });
 
   app.get("/api/polls/:id", auth, (c) => {

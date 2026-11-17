@@ -445,6 +445,45 @@ export async function apiScenarios() {
     assert(v.poll.tally.for.length === 0, "первый голос остался: " + s.slice(0, 300));
     assert(v.poll.tally.against.length === 1, "голос задвоился: " + s.slice(0, 300));
   });
+  await check("опрос Telegram: выбранные лички, общий итог, переголосование и остановка", async () => {
+    const question = "Где встречаемся?";
+    const { poll } = ok(await j("POST", "/api/polls", {
+      token: w1,
+      body: {
+        question, closesTime: "15:00", audience: { kind: "picked", employeeIds: [w2id] },
+        telegram: { options: ["Кафе", "Парк", "Музей"], multiple: true },
+      },
+    }), 201);
+    const ballots = tg.calls.filter((call) => call.method === "sendPoll" && call.body.question === question);
+    assert(ballots.length === 2 && ballots.every((call) => call.body.protect_content === true
+      && call.body.allows_multiple_answers === true), "не те карточки Telegram");
+    const first = ballots.find((call) => String(call.body.chat_id) === String(W1.id));
+    const second = ballots.find((call) => String(call.body.chat_id) === String(W2.id));
+    assert(first?.pollId && second?.pollId && first.pollId !== second.pollId, "нет отдельных личных карточек");
+    tg.voteNative(W1.id, "Игорь", second.pollId, [0]);
+    tg.voteNative(W1.id, "Игорь", first.pollId, [0, 2]);
+    tg.voteNative(W2.id, "Марк", second.pollId, [1]);
+    tg.voteNative(W2.id, "Марк", second.pollId, [2]);
+    const result = await until(async () => {
+      const { poll: current } = ok(await j("GET", `/api/polls/${poll.id}`, { token: w2 }));
+      return current.telegram.options.map((option) => option.count).join(",") === "1,0,2" && current.telegram;
+    });
+    assert(result?.votedCount === 2 && result.myOptionIds.join(",") === "2", "нет общей сводки Telegram");
+    tg.voteNative(W1.id, "Игорь", first.pollId, []);
+    assert(await until(async () => {
+      const { poll: current } = ok(await j("GET", `/api/polls/${poll.id}`, { token: w2 }));
+      return current.telegram.votedCount === 1;
+    }), "голос не отозван");
+    // Telegram принял изменение, но событие ещё не дошло до long-polling.
+    tg.voteNative(W2.id, "Марк", second.pollId, [1], false);
+    ok(await j("POST", `/api/polls/${poll.id}/close`, { token: w1, body: {} }));
+    assert(await until(() => ballots.every((ballot) => tg.calls.some((call) =>
+      call.method === "stopPoll" && call.body.chat_id === ballot.body.chat_id && call.body.message_id === ballot.messageId
+    ))), "не все карточки остановлены");
+    const closed = ok(await j("GET", `/api/polls/${poll.id}`, { token: w2 })).poll;
+    assert(closed.telegram.myOptionIds.join(",") === "1", "потерян выбор из финального снимка Telegram");
+    assert(tg.sentTo(W2.id).some((call) => call.body.text.includes(question) && call.body.text.includes("Парк — 1")), "рассылка использовала старый итог");
+  });
   await check("заказ еды: место → заказ → позиция → правка; чужую позицию админ не удаляет", async () => {
     const pl = ok(
       await j("POST", "/api/food-places", {

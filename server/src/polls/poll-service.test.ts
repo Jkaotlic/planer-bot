@@ -3,10 +3,12 @@ import { makeTestDb } from "../db/testdb";
 import { archiveEmployee, createEmployee, linkTelegramAccount, setEmployeeAdmin } from "../repo/employees";
 import { polls } from "../db/schema";
 import { eq } from "drizzle-orm";
-import { POLL_OPEN_MAX_DAYS } from "@planer/shared";
+import { POLL_OPEN_MAX_DAYS, telegramPollConfigSchema } from "@planer/shared";
 import type { Db } from "../db/client";
 import {
-  cancelPoll, castVote, closeDuePolls, closePoll, createPoll, getPoll, listPollsFor, pollView, voteOf,
+  cancelPoll, castVote, closeDuePolls, closePoll, createPoll, getPoll, listPollsFor, pollView,
+  hasTelegramPollFinalState, recordTelegramPollAnswer, recordTelegramPollState, setTelegramPollMessage,
+  telegramPollResultText, voteOf,
 } from "./poll-service";
 
 const now = { date: "2026-09-29", time: "12:00" };
@@ -49,6 +51,79 @@ describe("голосование", () => {
     const { db, anya, igor, poll } = stage();
     closePoll(db, poll, anya);
     expect(castVote(db, getPoll(db, poll.id)!, igor.id, "for", now)).toEqual({ ok: false, error: "Опрос закрыт." });
+  });
+});
+
+describe("встроенный опрос Telegram", () => {
+  function telegramStage(multiple = true) {
+    const { db, anya, igor, mark } = stage();
+    const poll = createPoll(db, {
+      createdBy: anya.id, question: "Что заказать?", closesAt: "2026-09-29T18:00",
+      recipientIds: [anya.id, igor.id],
+      telegram: { options: ["Салат", "Суп", "Паста"], multiple },
+    });
+    setTelegramPollMessage(db, poll.id, anya.id, { messageId: 230, telegramPollId: "a", telegramPollChatId: 100 });
+    setTelegramPollMessage(db, poll.id, igor.id, { messageId: 231, telegramPollId: "b", telegramPollChatId: 101 });
+    return { db, anya, igor, mark, poll };
+  }
+
+  it("хранит разные варианты и отклоняет пустое, слишком длинное или совпадающее имя", () => {
+    expect(telegramPollConfigSchema.parse({ options: [" Салат ", "Суп"], multiple: false }).options)
+      .toEqual(["Салат", "Суп"]);
+    for (const options of [["Суп"], ["Суп", " "], ["Суп", " суп "], ["Суп", "х".repeat(101)]]) {
+      expect(telegramPollConfigSchema.safeParse({ options, multiple: false }).success).toBe(false);
+    }
+  });
+
+  it("сводит голоса из двух личных карточек и заменяет выбор при переголосовании", () => {
+    const { db, anya, igor, poll } = telegramStage();
+    expect(recordTelegramPollAnswer(db, "a", 100, [0, 2], now)).toBe(true);
+    expect(recordTelegramPollAnswer(db, "b", 101, [1], now)).toBe(true);
+    expect(recordTelegramPollAnswer(db, "b", 101, [2], now)).toBe(true);
+    expect(pollView(db, getPoll(db, poll.id)!, igor, now)?.telegram).toEqual({
+      options: [{ text: "Салат", count: 1 }, { text: "Суп", count: 0 }, { text: "Паста", count: 2 }],
+      multiple: true, myOptionIds: [2], votedCount: 2, canVote: true,
+    });
+    expect(recordTelegramPollAnswer(db, "a", 100, [], now)).toBe(true);
+    expect(pollView(db, poll, anya, now)?.telegram).toMatchObject({ myOptionIds: [], votedCount: 1 });
+    expect(castVote(db, poll, anya.id, "for", now)).toMatchObject({ ok: false });
+  });
+
+  it("принимает только допустимый голос того, кому пришла эта карточка, до закрытия", () => {
+    const { db, anya, igor, mark, poll } = telegramStage(false);
+    expect(recordTelegramPollAnswer(db, "a", 101, [0], now)).toBe(false);
+    expect(recordTelegramPollAnswer(db, "a", 102, [0], now)).toBe(false);
+    expect(recordTelegramPollAnswer(db, "b", 101, [0, 1], now)).toBe(false);
+    expect(recordTelegramPollAnswer(db, "b", 101, [3], now)).toBe(false);
+    expect(recordTelegramPollAnswer(db, "b", 101, [1], { ...now, time: "18:00" })).toBe(false);
+    expect(pollView(db, poll, mark, now)).toBeNull();
+    archiveEmployee(db, igor.id, now.date);
+    expect(recordTelegramPollAnswer(db, "b", 101, [1], now)).toBe(false);
+    closePoll(db, poll, anya);
+    expect(recordTelegramPollAnswer(db, "a", 100, [1], now)).toBe(false);
+  });
+
+  it("учитывает итог закрытой карточки Telegram, даже если опоздал апдейт голоса", () => {
+    const { db, anya, poll } = telegramStage();
+    closePoll(db, poll, anya);
+    const snapshot = {
+      id: "a", is_closed: true, total_voter_count: 1,
+      options: [{ text: "Салат", voter_count: 0 }, { text: "Суп", voter_count: 1 }, { text: "Паста", voter_count: 1 }],
+    };
+    expect(telegramPollResultText(db, getPoll(db, poll.id)!)).toContain("Предварительный итог");
+    expect(recordTelegramPollState(db, { ...snapshot, total_voter_count: 2 })).toBe(false);
+    expect(recordTelegramPollState(db, { ...snapshot, is_closed: false })).toBe(false);
+    expect(recordTelegramPollState(db, { ...snapshot, options: [...snapshot.options].reverse() })).toBe(false);
+    expect(recordTelegramPollState(db, snapshot)).toBe(true);
+    expect(hasTelegramPollFinalState(db, 100, 230)).toBe(true);
+    expect(hasTelegramPollFinalState(db, 101, 231)).toBe(false);
+    expect(pollView(db, getPoll(db, poll.id)!, anya, now)?.telegram).toMatchObject({
+      votedCount: 1, myOptionIds: [1, 2], canVote: false,
+    });
+    expect(recordTelegramPollState(db, {
+      ...snapshot, total_voter_count: 0, options: snapshot.options.map((option) => ({ ...option, voter_count: 0 })),
+    })).toBe(true);
+    expect(pollView(db, poll, anya, now)?.telegram?.votedCount).toBe(0);
   });
 });
 

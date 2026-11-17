@@ -47,6 +47,26 @@ describe("PollForm", () => {
     expect(onDone).toHaveBeenCalled();
   });
 
+  it("отправляет свои варианты Telegram только после заполнения двух разных строк", async () => {
+    const create = vi.spyOn(apiClient, "createPoll").mockResolvedValue({ poll: {} as never, delivered: 2, unreachable: [] });
+    const { el } = await mount();
+    await act(async () => type(el.querySelector("textarea")!, "На чём поедем?"));
+    await act(async () => byText(el, "Опрос Telegram").click());
+    expect(el.querySelector("textarea")!.maxLength).toBe(300);
+    expect(byText(el, "Отправить").disabled).toBe(true);
+    const option = (n: number) => el.querySelector<HTMLInputElement>(`input[aria-label="Вариант ${n}"]`)!;
+    await act(async () => type(option(1), "Автобус"));
+    await act(async () => type(option(2), " автобус "));
+    expect(byText(el, "Отправить").disabled).toBe(true);
+    expect(el.textContent).toContain("Варианты ответа должны различаться.");
+    await act(async () => type(option(2), "Поезд"));
+    await act(async () => byText(el, "Отправить").click());
+    expect(create).toHaveBeenCalledWith({
+      question: "На чём поедем?", closesTime: null, audience: { kind: "on_shift" },
+      telegram: { options: ["Автобус", "Поезд"], multiple: false },
+    });
+  });
+
   it("ошибка сервера показывается текстом, форма не закрывается", async () => {
     vi.spyOn(apiClient, "createPoll").mockRejectedValue(new Error("Некому отправить: в списке никого, кроме тебя."));
     const { el, onDone } = await mount();

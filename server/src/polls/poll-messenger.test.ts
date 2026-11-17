@@ -32,7 +32,7 @@ describe("рассылка опроса", () => {
     const poll = createPoll(db, { createdBy: anya.id, question: "Пицца?", closesAt: "2026-09-29T18:00", recipientIds: [anya.id, igor.id] });
     const { bot } = silentBot();
     const api = recordApi(bot);
-    expect(await sendPollInvites(bot, db, poll, now)).toBe(2);
+    expect(await sendPollInvites(bot, db, poll, now, "Europe/Moscow")).toBe(2);
     const toAnya = api.sent.find((m) => m.chat_id === 100)!;
     const toIgor = api.sent.find((m) => m.chat_id === 101)!;
     expect(toIgor.text).toContain("Аня спрашивает");
@@ -50,7 +50,7 @@ describe("рассылка опроса", () => {
     const { bot } = silentBot();
     const api = recordApi(bot);
     // Разослать приглашения — иначе у адресатов нет `messageId`, и гасить нечего.
-    await sendPollInvites(bot, db, poll, now);
+    await sendPollInvites(bot, db, poll, now, "Europe/Moscow");
     castVote(db, poll, igor.id, "for", now);
     closePoll(db, poll, anya);
     await finishPollMessages(bot, db, getPoll(db, poll.id)!, "closed");
@@ -76,7 +76,7 @@ describe("рассылка опроса", () => {
     const igor = person(db, "Игорь", 101);
     const poll = createPoll(db, { createdBy: anya.id, question: "Пицца?", closesAt: null, recipientIds: [anya.id, igor.id] });
     const { bot } = silentBot();
-    await sendPollInvites(bot, db, poll, now);
+    await sendPollInvites(bot, db, poll, now, "Europe/Moscow");
     closePoll(db, poll, anya);
 
     // Письмо могли удалить между рассылкой и закрытием — правка кнопок тогда
@@ -103,7 +103,7 @@ describe("архивный адресат опроса", () => {
     const anya = person(db, "Аня", 100);
     const igor = person(db, "Игорь", 101);
     const poll = createPoll(db, { createdBy: anya.id, question: "Пицца?", closesAt: null, recipientIds: [anya.id, igor.id] });
-    await sendPollInvites(silentBot().bot, db, poll, now);
+    await sendPollInvites(silentBot().bot, db, poll, now, "Europe/Moscow");
     archiveEmployee(db, igor.id, now.date);
     const { bot } = silentBot();
     const api = recordApi(bot);
@@ -146,7 +146,7 @@ describe("перерисовка письма опроса", () => {
     const poll = createPoll(db, { createdBy: anya.id, question: "Пицца?", closesAt: null, recipientIds: [anya.id, igor.id] });
     const { bot } = silentBot();
     const api = recordApi(bot);
-    await sendPollInvites(bot, db, poll, now);
+    await sendPollInvites(bot, db, poll, now, "Europe/Moscow");
     const igorMessage = pollRecipientRows(db, poll.id).find((r) => r.employeeId === igor.id)!.messageId;
     castVote(db, poll, igor.id, "for", now);
     await redrawPollMessage(bot, db, poll, igor.id, now);
@@ -172,7 +172,7 @@ describe("«Напомнить молчащим»", () => {
       createdBy: anya.id, question: "Пицца?", closesAt: "2026-09-29T18:00",
       recipientIds: [anya.id, igor.id, mark.id, dasha.id, vera.id],
     });
-    await sendPollInvites(silentBot().bot, db, poll, now);
+    await sendPollInvites(silentBot().bot, db, poll, now, "Europe/Moscow");
     castVote(db, poll, anya.id, "for", now);
     castVote(db, poll, igor.id, "against", now);
     archiveEmployee(db, vera.id, now.date);
@@ -225,7 +225,7 @@ describe("срок в письме — абсолютным днём, не «з�
     const poll = createPoll(db, { createdBy: anya.id, question: "Пицца?", closesAt: "2026-10-27T08:00", recipientIds: [anya.id, igor.id] });
     const { bot } = silentBot();
     const api = recordApi(bot);
-    await sendPollInvites(bot, db, poll, lateNight);
+    await sendPollInvites(bot, db, poll, lateNight, "Europe/Moscow");
     await remindSilent(bot, db, poll, lateNight);
     const toIgor = api.sent.filter((m) => m.chat_id === 101);
     expect(toIgor).toHaveLength(2);

@@ -13,6 +13,24 @@ afterEach(async () => {
 const card = (el: HTMLElement) => el.querySelector<HTMLElement>(".food-card")!;
 
 describe("консоль: карточка опроса", () => {
+  it("итог Telegram показывает свои варианты и обновляет число голосов", async () => {
+    const telegram = { options: [{ text: "Парк", count: 1 }, { text: "Музей", count: 2 }], multiple: true, myOptionIds: [0], votedCount: 2, canVote: true };
+    const current = pollView({ telegram });
+    const refresh = vi.spyOn(apiClient, "getPoll").mockResolvedValue({
+      ...current, telegram: { ...telegram, options: [{ text: "Парк", count: 3 }, { text: "Музей", count: 2 }], votedCount: 3 },
+    });
+    const el = await mount(PollCard, { poll: current });
+    expect(el.textContent).toContain("Проголосуй в личном чате с ботом");
+    expect(el.textContent).toContain("Ответили: 2");
+    expect(el.textContent).toContain("Парк");
+    expect(el.textContent).toContain("Твой выбор");
+    expect(maybeButton(el, "👍 За")).toBeUndefined();
+    expect(maybeButton(el, "🔔 Напомнить молчащим")).not.toBeUndefined();
+    await click(button(el, "Обновить итог"));
+    await waitFor(() => expect(el.textContent).toContain("Ответили: 3"));
+    expect(refresh).toHaveBeenCalledWith(current.id);
+  });
+
   it("голос уходит с выбором, нажатая кнопка помечена, итог поимённо", async () => {
     const vote = vi.spyOn(apiClient, "votePoll").mockResolvedValue(
       pollView({ myChoice: "for", tally: { for: ["Аня"], against: [], abstain: [], silent: ["Игорь"] } }),

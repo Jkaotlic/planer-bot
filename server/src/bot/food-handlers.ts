@@ -6,7 +6,9 @@ import type { Employee } from "../db/schema";
 import { teamNow } from "../util/team-time";
 import { safeErrorMessage } from "../util/safe-error";
 import { recordAudit } from "../repo/audit";
-import { castVote, getPoll, listPollsFor, pollView, canManage } from "../polls/poll-service";
+import {
+  castVote, getPoll, listPollsFor, pollView, canManage, recordTelegramPollAnswer, recordTelegramPollState, telegramPollResultText,
+} from "../polls/poll-service";
 import { pollKeyboard, pollTextFor } from "../polls/poll-messenger";
 import { addMenuItem, declineOrder, getOrder, itemsOf, listOrdersFor, removeLastItem, type RemovedStep } from "../orders/order-service";
 import { setOrderPaid, unpaidDebtors } from "../orders/order-payment-service";
@@ -181,6 +183,16 @@ export function installFoodHandlers(bot: Bot, deps: FoodHandlerDeps): { sendServ
     }));
   }
 
+  bot.on("poll_answer", (ctx) => {
+    const { poll_id, user, option_ids } = ctx.pollAnswer;
+    if (!user || user.is_bot) return;
+    recordTelegramPollAnswer(db, poll_id, user.id, option_ids, teamNow(config.teamTz));
+  });
+
+  bot.on("poll", (ctx) => {
+    if (ctx.poll.is_closed) recordTelegramPollState(db, ctx.poll);
+  });
+
   bot.callbackQuery(/^poll:v:(\d+):(for|against|abstain)$/, async (ctx) => {
     const who = acting(ctx.from.id);
     if (!who.ok) { await ctx.answerCallbackQuery({ text: who.text }); return; }
@@ -213,7 +225,13 @@ export function installFoodHandlers(bot: Bot, deps: FoodHandlerDeps): { sendServ
     if (!who.ok) { await ctx.answerCallbackQuery({ text: who.text }); return; }
     const poll = getPoll(db, Number(ctx.match[1]));
     const view = poll ? pollView(db, poll, viewerOf(who.me, ctx.from.id), teamNow(config.teamTz)) : null;
-    if (!view) { await ctx.answerCallbackQuery({ text: "Этот опрос тебе не приходил." }); return; }
+    if (!poll || !view) { await ctx.answerCallbackQuery({ text: "Этот опрос тебе не приходил." }); return; }
+    if (view.telegram) {
+      await ctx.answerCallbackQuery();
+      // Длинный список вариантов не помещается во всплывашку Telegram.
+      await ctx.api.sendMessage(ctx.from.id, telegramPollResultText(db, poll), { protect_content: true });
+      return;
+    }
     const t = view.tally;
     // Всплывашка, а не письмо: итог «на сейчас» нужен на секунду, а чат и так
     // получит полный итог с именами при закрытии.

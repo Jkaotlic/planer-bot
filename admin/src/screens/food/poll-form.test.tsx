@@ -40,6 +40,42 @@ describe("консоль: новый опрос", () => {
     expect(button(el, "Отправить").disabled).toBe(true);
   });
 
+  it("опрос Telegram отправляет свои разные варианты и выбор нескольких", async () => {
+    const create = vi.spyOn(apiClient, "createPoll").mockResolvedValue({ poll: pollView(), delivered: 2, unreachable: [] });
+    const el = await mount(PollForm, props());
+    await type(question(el), "Куда поедем?");
+    await click(button(el, "Опрос Telegram"));
+    expect(el.textContent).toContain("Голоса открытые");
+    expect(button(el, "Отправить").disabled).toBe(true);
+    const option = (n: number) => el.querySelector<HTMLInputElement>(`input[aria-label="Вариант ${n}"]`)!;
+    await type(option(1), "  Парк ");
+    await type(option(2), "парк");
+    expect(button(el, "Отправить").disabled).toBe(true);
+    expect(el.textContent).toContain("Варианты ответа должны различаться.");
+    await type(option(2), "Музей");
+    await click(button(el, "Добавить вариант"));
+    await type(option(3), "Театр");
+    await click(el.querySelector<HTMLButtonElement>('button[aria-label="Удалить вариант 3"]')!);
+    await click(el.querySelector<HTMLInputElement>('input[aria-label="Можно выбрать несколько вариантов"]')!);
+    await click(button(el, "Отправить"));
+    await waitFor(() => expect(create).toHaveBeenCalledWith({
+      question: "Куда поедем?", closesTime: null, audience: { kind: "on_shift" },
+      telegram: { options: ["Парк", "Музей"], multiple: true },
+    }));
+  });
+
+  it("оставляет длинный вопрос при смене формата и объясняет лимит быстрого опроса", async () => {
+    const el = await mount(PollForm, props());
+    expect(question(el).maxLength).toBe(200);
+    await click(button(el, "Опрос Telegram"));
+    expect(question(el).maxLength).toBe(300);
+    await type(question(el), "А".repeat(250));
+    await click(button(el, "Быстрый опрос"));
+    expect(question(el).value).toHaveLength(250);
+    expect(button(el, "Отправить").disabled).toBe(true);
+    expect(el.textContent).toContain("Вопрос должен быть до 200 символов.");
+  });
+
   it("дошло не всем — отчёт и «ОК»", async () => {
     vi.spyOn(apiClient, "createPoll").mockResolvedValue({ poll: pollView(), delivered: 2, unreachable: ["Дима"] });
     const p = props();

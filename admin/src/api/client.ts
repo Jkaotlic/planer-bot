@@ -6,7 +6,7 @@ import type { AnnouncementRecipient, RecipientGroupView, SickApprovalRow } from 
 // Опросы, заказы еды и места — те же ответы и правила, что у мини-аппа (спека
 // 2026-10-06): типы общие из shared, чтобы две морды не разошлись в форме.
 import type {
-  AudienceCandidate, FoodSendReport, OrderRemindResult, OrderView, PlaceInput, PlaceView, PollChoice, PollRemindResult, PollView, TeamAudience,
+  AudienceCandidate, CreatePollInput, FoodSendReport, OrderRemindResult, OrderView, PlaceInput, PlaceView, PollChoice, PollRemindResult, PollView, TeamAudience,
 } from "@planer/shared";
 export type {
   AudienceCandidate, FoodSendReport, OrderRemindResult, OrderView, PlaceInput, PlaceView, PollChoice, PollRemindResult, PollView, TeamAudience,
@@ -787,7 +787,7 @@ export interface ApiClient {
   /** Один опрос — карточка перечитывает его после отказа действия. */
   getPoll(id: number): Promise<PollView>;
   /** Заводит опрос и сразу шлёт приглашения адресатам. */
-  createPoll(input: { question: string; closesTime: string | null; audience: TeamAudience }): Promise<{ poll: PollView } & FoodSendReport>;
+  createPoll(input: CreatePollInput): Promise<{ poll: PollView } & FoodSendReport>;
   votePoll(id: number, choice: PollChoice): Promise<PollView>;
   /** «Закрыть и разослать итог». Админ может и чужой — так решено ещё для мини-аппа. */
   closePoll(id: number): Promise<PollView>;

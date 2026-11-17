@@ -12,7 +12,7 @@ export type { TeamAudience, PollChoice, PollTally } from "@planer/shared";
 export type { PlaceInput } from "@planer/shared";
 // Ответы ручек опросов, заказов, мест и адресатов — в shared с 2026-10-06: их же
 // читает консоль, а две копии одной формы разъезжаются молча.
-import type { AudienceCandidate, OrderView, PlaceView, PollRemindResult, PollView } from "@planer/shared";
+import type { AudienceCandidate, CreatePollInput, OrderView, PlaceView, PollRemindResult, PollView } from "@planer/shared";
 export type { AudienceCandidate, OrderView, PlaceView, PollRemindResult, PollView } from "@planer/shared";
 import type {
   AdminEmployeeDto,
@@ -1031,7 +1031,7 @@ export interface ApiClient {
   /** Один опрос — карточка перечитывает его после отказа действия. */
   getPoll(id: number): Promise<PollView>;
   /** Заводит опрос и сразу шлёт приглашения адресатам. */
-  createPoll(input: { question: string; closesTime: string | null; audience: TeamAudience }): Promise<{ poll: PollView; delivered: number; unreachable: string[]; deliveredToNobody?: boolean }>;
+  createPoll(input: CreatePollInput): Promise<{ poll: PollView; delivered: number; unreachable: string[]; deliveredToNobody?: boolean }>;
   /** Свой голос — «За» / «Против» / «Воздержался». */
   votePoll(id: number, choice: PollChoice): Promise<PollView>;
   /** «Набрали, закрыть»: приём голосов останавливается, итог уходит всем. */

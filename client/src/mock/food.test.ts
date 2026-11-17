@@ -15,6 +15,31 @@ function mockAs(me: { id: number; isAdmin: boolean }, now = { date: "2026-10-06"
 }
 
 describe("createFoodMock: «кто я» — из состояния морды", () => {
+  it("заводит опрос Telegram с вариантами, а старый API голоса его не меняет", async () => {
+    const { state, mock } = mockAs({ id: 1, isAdmin: true });
+    const { poll } = await mock.createPoll({
+      question: "На чём поедем?", closesTime: null, audience: { kind: "picked", employeeIds: [2] },
+      telegram: { options: [" Автобус ", "Поезд"], multiple: true },
+    });
+    state.me = { id: 2, isAdmin: false };
+    expect((await mock.getPoll(poll.id)).telegram).toEqual({
+      options: [{ text: "Автобус", count: 0 }, { text: "Поезд", count: 0 }], multiple: true,
+      myOptionIds: [], votedCount: 0, canVote: true,
+    });
+    await expect(mock.votePoll(poll.id, "for")).rejects.toThrow("Telegram");
+  });
+
+  it("новый Telegram-аккаунт не видит подсказку о письме, которое ушло на старый", async () => {
+    const { state, mock } = mockAs({ id: 1, isAdmin: true });
+    const { poll } = await mock.createPoll({
+      question: "На чём поедем?", closesTime: null, audience: { kind: "picked", employeeIds: [2] },
+      telegram: { options: ["Автобус", "Поезд"], multiple: false },
+    });
+    state.me = { id: 2, isAdmin: false };
+    state.employees = state.employees.map((person) => person.id === 2 ? { ...person, telegramUserId: 103 } : person);
+    expect((await mock.getPoll(poll.id)).telegram?.canVote).toBe(false);
+  });
+
   it("кандидаты — без самого себя, с ролью и «дойдёт ли»", async () => {
     const { mock } = mockAs({ id: 2, isAdmin: false });
     const people = await mock.getTeamAudience();

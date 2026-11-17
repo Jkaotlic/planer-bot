@@ -4,13 +4,7 @@ import { FOOD_CLOSE_HORIZON_DAYS } from "./food-order";
 import { TELEGRAM_TEXT_SAFE_MAX } from "./text-limits";
 import { addDaysIso, weekdayShort } from "./week-dates";
 
-/**
- * Опрос «За / Против / Воздержался».
- *
- * Только три ответа — так он решил (2026-09-29): свои варианты и мультивыбор
- * не просили, а каждый из них — ещё одна форма в мини-аппе и ещё одна строка
- * в итогах, которую надо уметь читать.
- */
+/** Варианты быстрого опроса с кнопками бота. */
 export type PollChoice = "for" | "against" | "abstain";
 export const POLL_CHOICES: readonly PollChoice[] = ["for", "against", "abstain"];
 export const pollChoiceSchema = z.enum(["for", "against", "abstain"]);
@@ -22,6 +16,21 @@ export const POLL_CHOICE_LABEL: Record<PollChoice, string> = {
 };
 
 export const POLL_QUESTION_MAX = 200;
+export const POLL_TELEGRAM_QUESTION_MAX = 300;
+export const POLL_TELEGRAM_OPTION_LIMIT = 12;
+export const POLL_TELEGRAM_OPTION_MAX = 100;
+
+export const telegramPollConfigSchema = z.object({
+  options: z.array(z.string().trim().min(1).max(POLL_TELEGRAM_OPTION_MAX))
+    .min(2)
+    .max(POLL_TELEGRAM_OPTION_LIMIT)
+    .refine(
+      (options) => new Set(options.map((option) => option.normalize("NFKC").toLowerCase())).size === options.length,
+      "Варианты ответа должны различаться.",
+    ),
+  multiple: z.boolean(),
+}).strict();
+export type TelegramPollConfig = z.infer<typeof telegramPollConfigSchema>;
 
 /**
  * Сколько дней живёт опрос без срока, прежде чем тик закроет его сам.

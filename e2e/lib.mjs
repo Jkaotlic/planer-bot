@@ -26,6 +26,8 @@ export function fakeTelegram(port) {
   let updId = 1;
   let msgId = 1000;
   const failFor = new Set();
+  const pollsByMessage = new Map();
+  const pollsById = new Map();
   const srv = http.createServer((req, res) => {
     const chunks = [];
     req.on("data", (c) => chunks.push(c));
@@ -88,15 +90,34 @@ export function fakeTelegram(port) {
       if (/^send/.test(method)) {
         call.messageId = ++msgId;
         call.messageDate = Math.floor(Date.now() / 1000);
+        const poll = method === "sendPoll" ? {
+          id: `native-${call.messageId}`, question: body.question, type: "regular",
+          is_anonymous: body.is_anonymous ?? true, allows_multiple_answers: body.allows_multiple_answers ?? false,
+          total_voter_count: 0, is_closed: false,
+          options: body.options.map((option, index) => ({
+            persistent_id: String(index), text: typeof option === "string" ? option : option.text, voter_count: 0,
+          })),
+        } : undefined;
+        if (poll) {
+          call.pollId = poll.id;
+          pollsByMessage.set(`${body.chat_id}:${call.messageId}`, poll);
+          pollsById.set(poll.id, { poll, chatId: Number(body.chat_id) });
+        }
         return send({
           ok: true,
           result: {
             message_id: call.messageId,
             date: call.messageDate,
             chat: { id: Number(body.chat_id) || 1, type: "private" },
-            text: body.text ?? "",
+            ...(poll ? { poll } : { text: body.text ?? "" }),
           },
         });
+      }
+      if (method === "stopPoll") {
+        const poll = pollsByMessage.get(`${body.chat_id}:${body.message_id}`);
+        if (!poll) return send({ ok: false, error_code: 400, description: "Bad Request: poll not found" });
+        poll.is_closed = true;
+        return send({ ok: true, result: poll });
       }
       if (/^edit/.test(method))
         return send({
@@ -168,6 +189,18 @@ export function fakeTelegram(port) {
           },
         },
       }),
+    voteNative: (id, name, pollId, optionIds, emit = true) => {
+      const answer = pollsById.get(pollId);
+      if (answer?.chatId === id && !answer.poll.is_closed) {
+        answer.poll.total_voter_count = Number(optionIds.length > 0);
+        answer.poll.options.forEach((option, index) => {
+          option.voter_count = Number(optionIds.includes(index));
+        });
+      }
+      if (emit) push({ poll_answer: {
+        poll_id: pollId, user: from(id, name), option_ids: optionIds, option_persistent_ids: optionIds.map(String),
+      } });
+    },
     sentTo: (id) => calls.filter((c) => String(c.body.chat_id) === String(id) && c.body.text),
   };
 }

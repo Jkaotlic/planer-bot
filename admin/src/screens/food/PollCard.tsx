@@ -18,7 +18,7 @@ export function PollCard({ poll: initial }: { poll: PollView }) {
   const [error, setError] = useState<string | null>(null);
   const [remindResult, setRemindResult] = useState<string | null>(null);
 
-  async function attempt(action: () => Promise<void>) {
+  async function attempt(action: () => Promise<void>, reconcile = true) {
     setBusy(true);
     setError(null);
     // Строка «Напомнил: …» — итог прошлого нажатия; после нового действия она устарела.
@@ -30,10 +30,12 @@ export function PollCard({ poll: initial }: { poll: PollView }) {
       // Любой отказ — повод перечитать: сервер мог закрыть опрос тиком, запускающий —
       // отменить его между рендером и кликом. Без этого кнопки голоса оставались бы
       // активными до перезагрузки списка. Отказ перечитывания не страшен: текст ошибки уже виден.
-      try {
-        setPoll(await apiClient.getPoll(poll.id));
-      } catch {
-        /* остаётся прежняя карточка */
+      if (reconcile) {
+        try {
+          setPoll(await apiClient.getPoll(poll.id));
+        } catch {
+          /* остаётся прежняя карточка */
+        }
       }
     } finally {
       setBusy(false);
@@ -44,12 +46,14 @@ export function PollCard({ poll: initial }: { poll: PollView }) {
   /** Напоминание отдаёт не опрос, а сколько дошло — как дожим у `OrderScreen`. */
   const remind = () => attempt(async () => setRemindResult(pollRemindResultText(await apiClient.remindPollSilent(poll.id))));
 
-  const tally = pollTallyLines(poll.tally);
+  const { telegram } = poll;
+  const tally = telegram ? [] : pollTallyLines(poll.tally);
+  const refresh = () => attempt(async () => setPoll(await apiClient.getPoll(poll.id)), false);
   return (
     <article className="food-card">
       <div className="food-card-title">🗳 {poll.question}</div>
-      <div className="food-meta">{poll.creatorName} · {pollStatusLabel(poll)}</div>
-      {poll.open && (
+      <div className="food-meta">{poll.creatorName} · {pollStatusLabel(poll)}{telegram ? " · Telegram" : ""}</div>
+      {poll.open && !telegram && (
         <div className="food-buttons" role="group" aria-label="Твой голос">
           {POLL_CHOICES.map((choice) => (
             <button
@@ -63,6 +67,26 @@ export function PollCard({ poll: initial }: { poll: PollView }) {
               {POLL_CHOICE_LABEL[choice]}
             </button>
           ))}
+        </div>
+      )}
+      {telegram && (
+        <div className="food-poll-options">
+          {poll.open && <div className="food-meta">
+            {telegram.canVote ? "Проголосуй в личном чате с ботом." : "Опрос проходит в личном чате с ботом."}
+            {telegram.canVote && telegram.multiple && " Можно выбрать несколько вариантов."}
+          </div>}
+          <ul className="food-poll-results" aria-label="Общий итог">
+            {telegram.options.map(({ text, count }, index) => (
+              <li key={text}>
+                <span>{text}{telegram.myOptionIds.includes(index) && <small className="food-meta"> · Твой выбор</small>}</span>
+                <strong>{count}</strong>
+              </li>
+            ))}
+          </ul>
+          <div className="food-poll-controls">
+            <div className="food-meta" role="status">Ответили: {telegram.votedCount}</div>
+            {poll.open && <button type="button" className="btn btn-quiet btn-compact" disabled={busy} onClick={() => void refresh()}>Обновить итог</button>}
+          </div>
         </div>
       )}
       {tally.length > 0 && (
