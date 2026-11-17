@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { countEmployeeByIdLookups, makeTestDb } from "../db/testdb";
 import { createEmployee, archiveEmployee, setEmployeeRestrictions, setEmployeeObserver } from "../repo/employees";
-import { createShift, listShiftsByEmployee, updateShift, deleteShift } from "../repo/shifts";
+import { createShift, getShift, listShiftsByEmployee, updateShift, deleteShift } from "../repo/shifts";
 import { createVacantSlot, createAssignment, confirmAssignment, setSlotStatus, addInterest } from "../repo/weekend";
 
 /** Fixtures use fixed 2026-07 dates, so «today» has to sit before them. */
@@ -249,7 +249,69 @@ describe("weekend market service", () => {
     const reoffered = assignSlot(db, slot.id, worker.id, TEST_TODAY);
     if (!reoffered.ok) throw new Error("unreachable");
     expect(reoffered.assignment.status).toBe("offered");
+    expect(reoffered.assignment.id).not.toBe(assigned.assignment.id);
+    expect(confirmOffer(db, assigned.assignment.id, worker.id, TEST_TODAY).ok).toBe(false);
     expect(listShiftsByEmployee(db, worker.id).filter((s) => s.category === "weekend_work")).toHaveLength(1);
+  });
+
+  describe("a schedule edit makes an old weekend offer stale", () => {
+    function offered() {
+      const db = makeTestDb();
+      const worker = createEmployee(db, { displayName: "Аня" });
+      const other = createEmployee(db, { displayName: "Игорь" });
+      const slot = postSlot(db, { date: "2026-07-18", start: "09:00", end: "13:00" });
+      expressInterest(db, slot.id, worker.id, TEST_TODAY);
+      const assigned = assignSlot(db, slot.id, worker.id, TEST_TODAY);
+      if (!assigned.ok || assigned.assignment.shiftId == null) throw new Error("setup");
+      return { db, worker, other, slot, assignmentId: assigned.assignment.id, shiftId: assigned.assignment.shiftId };
+    }
+
+    it("the original worker cannot decline or confirm an entry now owned by a colleague", () => {
+      const { db, worker, other, assignmentId, shiftId } = offered();
+      updateShift(db, shiftId, { employeeId: other.id });
+
+      expect(declineOffer(db, assignmentId, worker.id, TEST_TODAY)).toEqual({ ok: false, reason: "not_offered" });
+      expect(confirmOffer(db, assignmentId, worker.id, TEST_TODAY)).toEqual({ ok: false, reason: "not_offered" });
+      expect(getShift(db, shiftId)?.employeeId).toBe(other.id);
+    });
+
+    it("unassigning a stale offer leaves the colleague's shift intact", () => {
+      const { db, other, assignmentId, shiftId } = offered();
+      updateShift(db, shiftId, { employeeId: other.id });
+
+      expect(unassign(db, assignmentId).ok).toBe(true);
+      expect(getShift(db, shiftId)?.employeeId).toBe(other.id);
+    });
+
+    it("a deleted schedule entry stays deleted when the worker confirms the old offer", () => {
+      const { db, worker, slot, assignmentId, shiftId } = offered();
+      deleteShift(db, shiftId);
+      const replacement = createShift(db, { employeeId: worker.id, date: slot.date, category: "shift", start: "08:00", end: "16:00" });
+
+      expect(confirmOffer(db, assignmentId, worker.id, TEST_TODAY)).toEqual({ ok: false, reason: "not_offered" });
+      expect(listShiftsByEmployee(db, worker.id).map((shift) => shift.id)).toEqual([replacement.id]);
+    });
+
+    it("after an admin moves the shift, an old offer cannot delete or confirm it under the old hours", () => {
+      const { db, worker, slot, assignmentId, shiftId } = offered();
+      updateShift(db, shiftId, { start: "14:00", end: "18:00" });
+
+      expect(declineOffer(db, assignmentId, worker.id, TEST_TODAY)).toEqual({ ok: false, reason: "not_offered" });
+      expect(myOffers(db, worker.id)).toEqual([]);
+      expect(assigneesForSlot(db, slot.id)).toEqual([]);
+      expect(getShift(db, shiftId)?.start).toBe("14:00");
+    });
+
+    it("an admin can send a fresh valid offer after the old shift is deleted", () => {
+      const { db, worker, slot, assignmentId, shiftId } = offered();
+      deleteShift(db, shiftId);
+
+      const reoffered = assignSlot(db, slot.id, worker.id, TEST_TODAY);
+      if (!reoffered.ok) throw new Error(reoffered.reason);
+      expect(reoffered.assignment.id).not.toBe(assignmentId);
+      expect(declineOffer(db, assignmentId, worker.id, TEST_TODAY).ok).toBe(false);
+      expect(confirmOffer(db, reoffered.assignment.id, worker.id, TEST_TODAY).ok).toBe(true);
+    });
   });
 
   it("ranks equal candidates by who has been passed over most (volunteered, lost the slot)", () => {
@@ -586,7 +648,7 @@ describe("confirmOffer and being excluded/observer after the offer went out", ()
     const db = makeTestDb();
     const mark = createEmployee(db, { displayName: "Марк" });
     const slot = createVacantSlot(db, { date: "2026-07-18", start: "10:00", end: "18:00" });
-    // Как в проде: оффер выдан без предзаписанной смены — confirmOffer сам её создаёт.
+    // Старая запись без смены также не позволяет обойти запрет.
     const assignment = createAssignment(db, { slotId: slot.id, employeeId: mark.id, hours: 8 });
 
     setEmployeeRestrictions(db, mark.id, { excludedFromAssignment: true });
@@ -605,10 +667,7 @@ describe("confirmOffer and being excluded/observer after the offer went out", ()
     expect(listShiftsByEmployee(db, mark.id)).toHaveLength(0);
   });
 
-  // Ревью раунда 1: два разных пути в `confirmOffer` — `assignment.shiftId ==
-  // null` (выше) и «админ уже назначил» (`assignSlot`, где смена ставится
-  // сразу). Гейт должен срабатывать на обоих, а не только на том, что был под
-  // рукой первым.
+  // Обычный путь: при назначении админа запись уже есть.
   it("refuses to confirm once excluded, even on the admin-pre-assigned path (shift already exists)", () => {
     const db = makeTestDb();
     const mark = createEmployee(db, { displayName: "Марк" });
@@ -640,7 +699,7 @@ describe("выходные: имена — картой, а не запросо�
       const a = createAssignment(db, { slotId: prior.id, employeeId: id, hours: 8 });
       const sh = createShift(db, { date: prior.date, start: prior.start, end: prior.end, category: "weekend_work", employeeId: id });
       confirmAssignment(db, a.id, sh.id);
-      createAssignment(db, { slotId: slot.id, employeeId: id, hours: 8 });
+      expect(assignSlot(db, slot.id, id, TEST_TODAY).ok).toBe(true);
     }
     return { db, slotId: slot.id };
   }

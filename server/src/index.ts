@@ -91,7 +91,7 @@ const tickRound = createTickScheduler([
     { name: "sick-approval-remind", run: () => runSickApprovalReminderTick(db, bot) },
     // Закрытие просроченных опросов (и, с Задачи 13, заказов) — тем же
     // пятиминутным тиком, что и остальные: своего таймера не заводит.
-    { name: "food", run: () => runFoodTick(db, bot, teamNow(config.teamTz), config.publicUrl) },
+    { name: "food", run: () => runFoodTick(db, bot, teamNow(config.teamTz)) },
 ]);
 setInterval(tickRound, REMINDER_TICK_MS);
 
@@ -122,7 +122,9 @@ app.get("/", (c) => c.redirect("/app/"));
 
 const port = Number(process.env.PORT ?? 8080);
 if (!Number.isInteger(port) || port <= 0) throw new Error(`Invalid PORT: ${JSON.stringify(process.env.PORT)}`);
-const server = serve({ fetch: app.fetch, port });
+// Caddy хранит простаивающее соединение с бэкендом до двух минут. Если Node
+// закроет его раньше, запрос в момент закрытия может получить 502.
+const server = serve({ fetch: app.fetch, port, serverOptions: { keepAliveTimeout: 125_000 } });
 let shuttingDown = false;
 const shutdown = () => {
   if (shuttingDown) return;

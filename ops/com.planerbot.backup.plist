@@ -28,18 +28,22 @@
     <string>user</string>
 
     <key>WorkingDirectory</key>
-    <string>/Users/user/planer-bot</string>
+    <string>/Users/user/planer-bot-prod</string>
 
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
-        <string>/Users/user/planer-bot/ops/backup-db.sh</string>
+        <string>/Users/user/planer-bot-prod/ops/backup-db.sh</string>
     </array>
 
     <key>EnvironmentVariables</key>
     <dict>
         <key>HOME</key>
         <string>/Users/user</string>
+        <key>PLANER_DB</key>
+        <string>/Users/user/planer-data/planer.db</string>
+        <key>PLANER_DOCS_DIR</key>
+        <string>/Users/user/planer-data/checklist-docs</string>
         <key>PLANER_BACKUP_DIR</key>
         <string>/Users/user/planer-bot-backups</string>
         <key>PLANER_BACKUP_KEEP</key>

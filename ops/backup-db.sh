@@ -19,6 +19,8 @@
 #   PLANER_BACKUP_KEEP how many to keep            (default: 30)
 
 set -euo pipefail
+# Снимок содержит данные сотрудников, а архив — служебные инструкции.
+umask 077
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DB="${PLANER_DB:-${REPO_ROOT}/data/planer.db}"

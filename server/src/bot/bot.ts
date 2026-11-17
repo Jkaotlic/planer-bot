@@ -21,7 +21,7 @@ import { acceptSwap, declineSwap } from "../swap/swap-service";
 import { expressInterest, confirmOffer, declineOffer } from "../weekend/weekend-service";
 import { declineHandover, takeHandover } from "../handover/handover-service";
 import { createHandoverMessenger } from "../handover/handover-messenger";
-import { approveSickLeave, rejectSickLeave, sickApprovalDeps } from "../sick-approval/sick-approval-service";
+import { approveSickLeave, isCurrentApprovalMessage, rejectSickLeave, sickApprovalDeps } from "../sick-approval/sick-approval-service";
 import { getVacantSlot } from "../repo/weekend";
 import { collectionsForWorker, getCollection, previewCollection, setCollectionClosed, updateCollection } from "../collections/collection-service";
 import { setPaid } from "../collections/payment-service";
@@ -56,8 +56,9 @@ import { slotLineOf, swapAuditPayload } from "../util/message-lines";
 import { outsidePoolFacts } from "../swap/duty-notice";
 import { safeErrorMessage } from "../util/safe-error";
 import { openBugPrompt, getBugPending, clearBugPending, shouldCapture, submitBugReport, resolveBugReport } from "../bugs/bug-service";
-import { getChecklist, listChecklists, updateChecklist } from "../repo/checklists";
+import { getChecklist, listChecklists } from "../repo/checklists";
 import { clearDocPending, docPendingFor, startDocPending } from "../bugs/doc-pending";
+import { setChecklistDocument } from "../checklists/document";
 import { attachLink, extractUrl, linkAcceptedMessage, notifyLinkReady } from "../collections/link-capture";
 import { ensureBirthdayRound, linkCandidates, type LinkCandidate } from "../birthdays/birthday-service";
 import { clearLinkPending, linkPendingFor, setLinkPending } from "../repo/link-pending";
@@ -1282,7 +1283,7 @@ export function createBot(deps: BotDeps): Bot {
       await ctx.answerCallbackQuery({ text: "Чек-лист удалён" });
       return;
     }
-    updateChecklist(db, checklistId, { docFileId: null, docName: null });
+    setChecklistDocument(db, list, { docFileId: null, docName: null, docPath: null });
     clearDocPending(db, who.me.id);
     recordAudit(db, "checklist_doc_changed", who.me.id, { fileName: list.docName, attached: false, checklistName: list.name });
     await ctx.answerCallbackQuery({ text: "Убрал" });
@@ -1321,7 +1322,7 @@ export function createBot(deps: BotDeps): Bot {
     }
 
     const doc = ctx.msg.document;
-    updateChecklist(db, pending, { docFileId: doc.file_id, docName: doc.file_name ?? "Инструкция" });
+    setChecklistDocument(db, list, { docFileId: doc.file_id, docName: doc.file_name ?? "Инструкция", docPath: null });
     clearDocPending(db, who.me.id);
     recordAudit(db, "checklist_doc_changed", who.me.id, {
       fileName: doc.file_name ?? null,
@@ -1845,6 +1846,13 @@ export function createBot(deps: BotDeps): Bot {
       await ctx.answerCallbackQuery({ text: "Это может только админ" });
       return;
     }
+    const message = ctx.callbackQuery.message;
+    if (!isCurrentApprovalMessage(db, entryId, message ? {
+      chatId: message.chat.id, messageId: message.message_id, sentAt: message.date,
+    } : null)) {
+      await ctx.answerCallbackQuery({ text: "Кнопка устарела — открой свежее письмо или заявку в консоли" });
+      return;
+    }
     const deps = sickApprovalDeps(bot, db, config);
     // Answered between the decision and the broadcast — see `OnDecided`.
     const onDecided = () => ctx.answerCallbackQuery({ text: action === "approve" ? "Подтверждено ✅" : "Отклонено" });
@@ -1854,7 +1862,6 @@ export function createBot(deps: BotDeps): Bot {
         : await rejectSickLeave(deps, entryId, who.me.id, onDecided);
     if (res.ok) return;
     await ctx.answerCallbackQuery({ text: res.text });
-    const message = ctx.callbackQuery.message;
     const original = message && "text" in message ? message.text : undefined;
     // The buttons go, the outcome takes their place; the text above stays readable.
     await safeEdit(() => (original ? ctx.editMessageText(`${original}\n\n${res.text}`) : ctx.editMessageReplyMarkup()));

@@ -6,7 +6,7 @@ import { describeClientError } from "./client-error";
 const config = { jwtSecret: "s", teamTz: "Europe/Moscow", publicUrl: "http://x", adminTelegramIds: [] } as any;
 
 describe("описание сбоя запуска", () => {
-  it("ставит рядом устройство и причину — по ним и опознаётся, у кого сломалось", () => {
+  it("ставит рядом устройство, причину и путь страницы", () => {
     const line = describeClientError({
       reason: "SyntaxError: Unexpected token '??='",
       userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 15_8 like Mac OS X)",
@@ -15,7 +15,8 @@ describe("описание сбоя запуска", () => {
 
     expect(line).toContain("SyntaxError");
     expect(line).toContain("iPhone OS 15_8");
-    expect(line).toContain("screen=sick");
+    expect(line).toContain("https://example.com/app/");
+    expect(line).not.toContain("screen=sick");
   });
 
   it("обрезает длинные поля — это единственная неаутентифицированная ручка, лог не должен раздуваться", () => {
@@ -63,5 +64,27 @@ describe("POST /api/client-error", () => {
 
     expect(res.status).toBe(204);
     warn.mockRestore();
+  });
+
+  it("не пишет в лог параметры Telegram и не принимает поддельную строку лога", async () => {
+    const app = createApp({ db: makeTestDb(), config });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const res = await app.request("/api/client-error", {
+        method: "POST",
+        body: JSON.stringify({
+          reason: "сбой\r\nПоддельная запись",
+          userAgent: "iPhone OS 15_8\u001b",
+          url: "https://example.com/app/?secret=abc#tgWebAppData=synthetic",
+        }),
+      });
+
+      expect(res.status).toBe(204);
+      const line = warn.mock.calls[0]?.join(" ");
+      expect(line).toContain("адрес: https://example.com/app/");
+      expect(line).not.toMatch(/secret|tgWebAppData|[\r\n]|\u001b/);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

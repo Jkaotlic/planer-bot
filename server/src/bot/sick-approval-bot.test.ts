@@ -4,22 +4,23 @@ import { createBot } from "./bot";
 import { callbackDataOf, recordApi, stubBotInfo } from "./testbot";
 import { makeTestDb } from "../db/testdb";
 import { createAdminEmployee, createEmployee, linkTelegramAccount } from "../repo/employees";
-import { createShift, deleteShift, getShift } from "../repo/shifts";
+import { createShift, deleteShift, getShift, updateShift } from "../repo/shifts";
 import { listHandoversForEntry } from "../repo/handovers";
-import { requestApproval, sickApprovalDeps } from "../sick-approval/sick-approval-service";
+import { listApprovalMessages } from "../repo/sick-approvals";
+import { approveSickLeave, requestApproval, sickApprovalDeps } from "../sick-approval/sick-approval-service";
 import { teamNow } from "../util/team-time";
 import { testConfig } from "../test-config";
 
 const config = testConfig();
 const day = (n: number) => addDaysIso(teamNow(config.teamTz).date, n);
 
-function press(tgId: number, data: string, messageId = 5) {
+function press(tgId: number, data: string, messageId = tgId === 112 ? 2 : 1, date = Math.floor(Date.now() / 1000)) {
   return {
     update_id: 9,
     callback_query: {
       id: `cbq-${tgId}`,
       from: { id: tgId, is_bot: false, first_name: "T" },
-      message: { message_id: messageId, date: 1_712_803_046, chat: { id: tgId, first_name: "T", type: "private" as const }, text: "🤒 Аня — больничный" },
+      message: { message_id: messageId, date, chat: { id: tgId, first_name: "T", type: "private" as const }, text: "🤒 Аня — больничный" },
       chat_instance: "x",
       data,
     },
@@ -30,7 +31,7 @@ async function scene() {
   const db = makeTestDb();
   const bot = stubBotInfo(createBot({ db, config }));
   const api = recordApi(bot);
-  createAdminEmployee(db, { displayName: "Игорь", telegramUserId: 111 });
+  const igor = createAdminEmployee(db, { displayName: "Игорь", telegramUserId: 111 });
   createAdminEmployee(db, { displayName: "Марк", telegramUserId: 112 });
   createEmployee(db, { displayName: "Аня", inviteToken: "tok-anya" });
   const anya = linkTelegramAccount(db, "tok-anya", 201)!;
@@ -38,7 +39,13 @@ async function scene() {
   linkTelegramAccount(db, "tok-oleg", 202);
   createShift(db, { employeeId: anya.id, date: day(1), start: "08:00", end: "17:00", category: "shift", title: "Утро" });
   const sick = await requestApproval(sickApprovalDeps(bot, db, config), createShift(db, { employeeId: anya.id, date: day(1), category: "sick_leave" }));
-  return { db, bot, api, sick };
+  return { db, bot, api, sick, igor };
+}
+
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => { resolve = done; });
+  return { promise, resolve };
 }
 
 describe("sick leave buttons", () => {
@@ -103,5 +110,71 @@ describe("sick leave buttons", () => {
     const edit = api.calls.filter((c) => c.method === "editMessageText").at(-1)!;
     expect(edit.payload.message_id).toBe(7);
     expect(edit.payload.text).toBe("🤒 Аня — больничный\n\nБольничного уже нет");
+  });
+
+  it("a button from the first request cannot reject an extension, even within the same second", async () => {
+    const { db, bot, api, sick } = await scene();
+    await bot.handleUpdate(press(111, `sick:approve:${sick.id}`) as never);
+    const deps = { ...sickApprovalDeps(bot, db, config), now: () => sick.approvalRequestedAt!.getTime() };
+    const stretched = updateShift(db, sick.id, { endDate: day(2) })!;
+    await requestApproval(deps, stretched, { date: day(1), endDate: null });
+
+    await bot.handleUpdate(press(111, `sick:reject:${sick.id}`, 1) as never);
+    expect(api.answers.at(-1)).toContain("устарела");
+    expect(getShift(db, sick.id)).toMatchObject({ endDate: day(2), approvalRequestedAt: sick.approvalRequestedAt });
+
+    const current = listApprovalMessages(db, sick.id).find((letter) => letter.chatId === 111)!;
+    await bot.handleUpdate(press(111, `sick:approve:${sick.id}`, current.messageId) as never);
+    expect(api.answers.at(-1)).toBe("Подтверждено ✅");
+    expect(getShift(db, sick.id)).toMatchObject({ endDate: day(2), approvalRequestedAt: null });
+  });
+
+  it("a delayed send from an older round cannot join a newer request's letters", async () => {
+    const { db, bot, api, sick, igor } = await scene();
+    const deps = { ...sickApprovalDeps(bot, db, config), now: () => sick.approvalRequestedAt!.getTime() };
+    await approveSickLeave(deps, sick.id, igor.id);
+    const sending = deferred();
+    const unblock = deferred();
+    let lateMessageId: number | undefined;
+    bot.api.config.use(async (prev, method, payload) => {
+      const result = await prev(method, payload);
+      if (method === "sendMessage" && (payload as { chat_id: number }).chat_id === 111 && lateMessageId == null) {
+        lateMessageId = (result as { result: { message_id: number } }).result.message_id;
+        sending.resolve();
+        await unblock.promise;
+      }
+      return result;
+    });
+    const firstExtension = requestApproval(deps, updateShift(db, sick.id, { endDate: day(2) })!, { date: day(1), endDate: null });
+    await sending.promise;
+    await approveSickLeave(deps, sick.id, igor.id);
+    await requestApproval(deps, updateShift(db, sick.id, { endDate: day(3) })!, { date: day(1), endDate: day(2) });
+    const current = listApprovalMessages(db, sick.id);
+    unblock.resolve();
+    await firstExtension;
+
+    expect(listApprovalMessages(db, sick.id)).toEqual(current);
+    await bot.handleUpdate(press(111, `sick:approve:${sick.id}`, lateMessageId) as never);
+    expect(api.answers.at(-1)).toContain("устарела");
+    expect(getShift(db, sick.id)?.approvalRequestedAt).not.toBeNull();
+  });
+
+  it("the first approval cannot take away the new request's letters while finishing", async () => {
+    const { db, bot, sick, igor } = await scene();
+    const deps = sickApprovalDeps(bot, db, config);
+    const decided = deferred();
+    const unblock = deferred();
+    const first = approveSickLeave(deps, sick.id, igor.id, () => {
+      decided.resolve();
+      return unblock.promise;
+    });
+    await decided.promise;
+    await requestApproval(deps, updateShift(db, sick.id, { endDate: day(2) })!, { date: day(1), endDate: null });
+    const current = listApprovalMessages(db, sick.id);
+    unblock.resolve();
+    await first;
+
+    expect(current).toHaveLength(2);
+    expect(listApprovalMessages(db, sick.id)).toEqual(current);
   });
 });

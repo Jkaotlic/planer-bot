@@ -1,4 +1,4 @@
-import { and, eq, gte, inArray, isNull, lte, like, notInArray } from "drizzle-orm";
+import { and, count, eq, gte, inArray, isNull, lte, like, notInArray, or, type SQL } from "drizzle-orm";
 import type { Db } from "../db/client";
 import {
   shifts,
@@ -163,6 +163,48 @@ export function getAssignment(db: Db, id: number): WeekendAssignment | undefined
   return db.select().from(weekendAssignments).where(eq(weekendAssignments.id, id)).get();
 }
 
+const linkedWeekendWork = and(
+  eq(shifts.id, weekendAssignments.shiftId),
+  eq(shifts.employeeId, weekendAssignments.employeeId),
+  eq(shifts.category, "weekend_work"),
+);
+
+/**
+ * The schedule can be edited independently. An offered assignment only applies
+ * to the time and worker who were asked. For a confirmed assignment, schedule
+ * edits to the date or hours already flow through to payroll.
+ */
+function liveAssignmentsQuery(db: Db, filter: SQL | undefined) {
+  return db.select({ assignment: weekendAssignments, slot: vacantSlots })
+    .from(weekendAssignments)
+    .innerJoin(vacantSlots, eq(vacantSlots.id, weekendAssignments.slotId))
+    .innerJoin(shifts, linkedWeekendWork)
+    .where(and(
+      filter,
+      or(
+        eq(weekendAssignments.status, "confirmed"),
+        and(
+          eq(weekendAssignments.status, "offered"),
+          eq(shifts.date, vacantSlots.date),
+          eq(shifts.start, vacantSlots.start),
+          eq(shifts.end, vacantSlots.end),
+        ),
+      ),
+    ));
+}
+
+export function getLiveAssignment(db: Db, id: number): WeekendAssignment | undefined {
+  return liveAssignmentsQuery(db, eq(weekendAssignments.id, id)).get()?.assignment;
+}
+
+export function listLiveAssignmentsForSlot(db: Db, slotId: number): WeekendAssignment[] {
+  return liveAssignmentsQuery(db, eq(weekendAssignments.slotId, slotId)).all().map(({ assignment }) => assignment);
+}
+
+export function listLiveOffersForEmployee(db: Db, employeeId: number): { assignment: WeekendAssignment; slot: VacantSlot }[] {
+  return liveAssignmentsQuery(db, eq(weekendAssignments.employeeId, employeeId)).all();
+}
+
 export function findAssignment(db: Db, slotId: number, employeeId: number): WeekendAssignment | undefined {
   return db
     .select()
@@ -173,14 +215,6 @@ export function findAssignment(db: Db, slotId: number, employeeId: number): Week
 
 export function deleteAssignment(db: Db, id: number): void {
   db.delete(weekendAssignments).where(eq(weekendAssignments.id, id)).run();
-}
-
-/** Puts a previously declined assignment back into "offered" with a fresh shift link. */
-export function reofferAssignment(db: Db, id: number, shiftId: number | null): void {
-  db.update(weekendAssignments)
-    .set({ status: "offered", shiftId, confirmedAt: null })
-    .where(eq(weekendAssignments.id, id))
-    .run();
 }
 
 export function setAssignmentShift(db: Db, id: number, shiftId: number | null): void {
@@ -207,8 +241,8 @@ export function listAssignmentsForEmployee(db: Db, employeeId: number): WeekendA
  * assign time — so an admin shortening or moving the entry changed the schedule
  * and nothing else, and the payroll export quietly kept paying the old figure.
  *
- * An assignment whose entry an admin deleted produces no row: the work is not in
- * the schedule. That deletion is a journalled `entry_deleted`, so it is findable.
+ * Confirmation belongs to the worker who accepted. If the entry was removed,
+ * reassigned or changed to another category, that confirmation produces no row.
  */
 export function listConfirmedWorkInRange(
   db: Db,
@@ -223,7 +257,7 @@ export function listConfirmedWorkInRange(
       end: shifts.end,
     })
     .from(weekendAssignments)
-    .innerJoin(shifts, eq(weekendAssignments.shiftId, shifts.id))
+    .innerJoin(shifts, linkedWeekendWork)
     .where(and(eq(weekendAssignments.status, "confirmed"), gte(shifts.date, from), lte(shifts.date, to)))
     .all();
 }
@@ -261,25 +295,24 @@ export function countPassedOver(db: Db, employeeId: number): number {
 
 export function countConfirmedByEmployeeInMonth(db: Db, employeeId: number, monthPrefix: string): number {
   return db
-    .select({ id: weekendAssignments.id })
+    .select({ total: count() })
     .from(weekendAssignments)
-    .innerJoin(vacantSlots, eq(weekendAssignments.slotId, vacantSlots.id))
+    .innerJoin(shifts, linkedWeekendWork)
     .where(and(
       eq(weekendAssignments.status, "confirmed"),
       eq(weekendAssignments.employeeId, employeeId),
-      like(vacantSlots.date, `${monthPrefix}%`),
+      like(shifts.date, `${monthPrefix}%`),
     ))
-    .all().length;
+    .get()?.total ?? 0;
 }
 
 /** Назначения, на которые человек ещё не ответил, у слотов в [from, to]. */
 export function listUnansweredAssignments(
   db: Db, from: string, to: string,
 ): { assignment: WeekendAssignment; slot: VacantSlot }[] {
-  return db
-    .select({ assignment: weekendAssignments, slot: vacantSlots })
-    .from(weekendAssignments)
-    .innerJoin(vacantSlots, eq(vacantSlots.id, weekendAssignments.slotId))
-    .where(and(eq(weekendAssignments.status, "offered"), gte(vacantSlots.date, from), lte(vacantSlots.date, to)))
-    .all();
+  return liveAssignmentsQuery(db, and(
+    eq(weekendAssignments.status, "offered"),
+    gte(vacantSlots.date, from),
+    lte(vacantSlots.date, to),
+  )).all();
 }

@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { sqliteTable, index, integer, text, real, primaryKey, uniqueIndex } from "drizzle-orm/sqlite-core";
+import type { InlineKeyboardMarkup } from "grammy/types";
 import type {
   SwapStatus,
   EntryCategory,
@@ -944,6 +945,19 @@ export const foodOrderRecipients = sqliteTable(
   },
   (t) => [primaryKey({ columns: [t.orderId, t.employeeId] })],
 );
+
+/** Ожидающие доставки письма при закрытии опроса или заказа. */
+export const foodCloseMessages = sqliteTable("food_close_messages", {
+  id: integer().primaryKey({ autoIncrement: true }),
+  scope: text().$type<`poll:${number}` | `order:${number}`>().notNull(),
+  employeeId: integer().notNull().references(() => employees.id),
+  telegramUserId: integer().notNull(),
+  messageId: integer(),
+  body: text(),
+  keyboard: text({ mode: "json" }).$type<InlineKeyboardMarkup>(),
+  paymentOrderId: integer().references(() => foodOrders.id),
+  nextAttemptAt: integer().notNull().default(0),
+}, (t) => [index("food_close_messages_due").on(t.nextAttemptAt), index("food_close_messages_scope").on(t.scope)]);
 
 /**
  * Позиция. Имя и цена КОПИРУЮТСЯ из меню в момент заказа: правка меню после

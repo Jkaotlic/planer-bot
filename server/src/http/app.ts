@@ -90,9 +90,11 @@ import {
   editClosedRequest,
   finishApprovalMessages,
   listSickApprovals,
-  reconcilePendingDateEdit,
+  announcePendingDateEdit,
+  reconcilePendingDateEditDb,
+  type PendingDateEdit,
   rejectSickLeave,
-  requestApproval,
+  sendApprovalRequest,
   sickApprovalDeps,
   takeRequestOutOfPending,
 } from "../sick-approval/sick-approval-service";
@@ -450,8 +452,8 @@ export function createApp(deps: AppDeps): Hono<Env> {
   // magnitude below the app-wide ceiling, so a login-flood specifically is
   // caught well before it could ever touch the general budget.
   app.post("/api/auth", rateLimiter({ windowMs: 60_000, max: 1_200 }), async (c) => {
-    const body = (await c.req.json().catch(() => ({}))) as { initData?: unknown };
-    const initData = typeof body.initData === "string" ? body.initData : (c.req.header("X-Init-Data") ?? "");
+    const body = (await c.req.json().catch(() => null)) as { initData?: unknown } | null;
+    const initData = typeof body?.initData === "string" ? body.initData : (c.req.header("X-Init-Data") ?? "");
     /**
      * Отказ входа пишется в лог, удачный вход — нет.
      *
@@ -1847,7 +1849,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
         );
       } else if (entry.date !== existing.date || entry.endDate !== existing.endDate) {
         // Same decision as for the worker's own date edit: redraw, or withdraw an extension.
-        await reconcilePendingDateEdit(approvalDeps, existing, entry);
+        await announcePendingDateEdit(approvalDeps, reconcilePendingDateEditDb(db, existing, entry));
       }
     }
     await notifyCancelledHandovers(approvalDeps, cancelledNow, { byAdmin: true });
@@ -1967,9 +1969,10 @@ export function createApp(deps: AppDeps): Hono<Env> {
     /** Первый уцелевший кусок — та же строка. `null` — отсутствие ушло целиком. */
     after: Shift | null;
     /** Куски после разреза, новые строки. */
-    split: { entry: Shift; asksApproval: { date: string; endDate: string | null } | null | false }[];
+    split: Shift[];
     removal: EntryRemoval | null;
     cancelledNow: CancelledHandover[];
+    pendingEdit: PendingDateEdit | null;
   };
 
   /**
@@ -1991,14 +1994,14 @@ export function createApp(deps: AppDeps): Hono<Env> {
     if (!first) {
       const by = nameOfDb(db, actorEmployeeId) ?? "админ";
       return {
-        before: row, after: null, split: [], cancelledNow: [],
+        before: row, after: null, split: [], cancelledNow: [], pendingEdit: null,
         removal: deleteEntryDb(row, `🗑 Больничного уже нет — ${by} поставил(а) на эти дни работу`),
       };
     }
     const pending = row.category === "sick_leave" && row.approvalRequestedAt != null;
     const { id: _id, createdAt: _created, updatedAt: _updated, ...fields } = row;
     const split = rest.map((piece) => {
-      if (!pending) return { entry: createShift(db, { ...fields, ...piece }), asksApproval: false as const };
+      if (!pending) return createShift(db, { ...fields, ...piece });
       // Заявка, ждущая «ОК», режется по тем же правилам, что продление: уже
       // одобренные дни куска остаются одобренными, и если кусок весь из них —
       // спрашивать про него нечего. Иначе у куска своя заявка и свои кнопки:
@@ -2007,21 +2010,27 @@ export function createApp(deps: AppDeps): Hono<Env> {
         ? null
         : sickSpanIntersection({ date: row.approvedDate, endDate: row.approvedEndDate }, piece);
       const wholly = approved != null && approved.date === piece.date && (approved.endDate ?? approved.date) === (piece.endDate ?? piece.date);
-      const entry = createShift(db, {
+      return createShift(db, {
         ...fields,
         ...piece,
         ...(wholly
           ? { approvalRequestedAt: null, approvedDate: null, approvedEndDate: null }
-          : { approvedDate: approved?.date ?? null, approvedEndDate: approved?.endDate ?? null }),
+          : {
+              approvalRequestedAt: new Date(),
+              approvedByEmployeeId: approved ? fields.approvedByEmployeeId : null,
+              approvedDate: approved?.date ?? null,
+              approvedEndDate: approved?.endDate ?? null,
+              handoverForcedAt: null,
+            }),
       });
-      return { entry, asksApproval: wholly ? (false as const) : approved };
     });
     const after = updateShift(db, row.id, { date: first.date, endDate: first.endDate })!;
-    if (row.category === "sick_leave") moveHandoversToSplitPiecesDb(db, row.id, after, split.map((piece) => piece.entry));
+    if (row.category === "sick_leave") moveHandoversToSplitPiecesDb(db, row.id, after, split);
     const cancelledNow = row.category === "sick_leave"
       ? cancelHandoversForEntryDb(db, row.id, eachDayIso(after.date, after.endDate ?? after.date))
       : [];
-    return { before: row, after, split, removal: null, cancelledNow };
+    const pendingEdit = pending ? reconcilePendingDateEditDb(db, row, after) : null;
+    return { before: row, after, split, removal: null, cancelledNow, pendingEdit };
   };
 
   /**
@@ -2039,17 +2048,17 @@ export function createApp(deps: AppDeps): Hono<Env> {
       return noticeBuffer.register({ actorEmployeeId, before: cut.before, after: null, now });
     }
     const approvalDeps = sickApprovalDeps(bot ?? null, db, config);
-    if (cut.before.category === "sick_leave" && cut.before.approvalRequestedAt != null && cut.after) {
-      await reconcilePendingDateEdit(approvalDeps, cut.before, cut.after);
-    }
+    if (cut.pendingEdit) await announcePendingDateEdit(approvalDeps, cut.pendingEdit);
     await notifyCancelledHandovers(approvalDeps, cut.cancelledNow, { byAdmin: true });
     recordAudit(db, "entry_updated", actorEmployeeId, {
       before: entryAuditPayload(db, cut.before), after: entryAuditPayload(db, cut.after!),
     });
     let reach = noticeBuffer.register({ actorEmployeeId, before: cut.before, after: cut.after, now });
-    for (const { entry, asksApproval } of cut.split) {
+    for (const entry of cut.split) {
       recordAudit(db, "entry_created", actorEmployeeId, entryAuditPayload(db, entry));
-      if (asksApproval !== false) await requestApproval(approvalDeps, entry, asksApproval);
+      // У куска уже есть заявка. Пока шли письма по первому куску, её могли
+      // рассмотреть или изменить. Отправка перечитывает состояние из базы.
+      if (entry.approvalRequestedAt != null) await sendApprovalRequest(approvalDeps, entry);
       reach = noticeBuffer.register({ actorEmployeeId, before: null, after: entry, now });
     }
     return reach;

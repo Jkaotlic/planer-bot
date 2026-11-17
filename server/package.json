@@ -10,13 +10,13 @@
     "db:migrate": "cd .. && drizzle-kit migrate"
   },
   "dependencies": {
-    "@hono/node-server": "^2.1.0",
+    "@hono/node-server": "^2.1.9",
     "@planer/shared": "*",
     "@resvg/resvg-js": "^2.6.2",
     "better-sqlite3": "^12.11.1",
     "drizzle-orm": "^0.45.2",
     "grammy": "^1.44.0",
-    "hono": "^4.13.1",
+    "hono": "^4.13.19",
     "jose": "^6.2.3",
     "qrcode": "^1.5.4",
     "zod": "^4.6.7"

@@ -158,7 +158,11 @@ export async function browserScenarios() {
     });
     await c.clock.setFixedTime(new Date());
     await c.addInitScript(() => {
-      window.TelegramWebviewProxy = { postEvent() {} };
+      window.TelegramWebviewProxy = {
+        postEvent(name) {
+          if (name === "web_app_ready") window.openingReady = true;
+        },
+      };
     });
     return c;
   };
@@ -251,6 +255,76 @@ export async function browserScenarios() {
       }
     } finally {
       THEME = LIGHT;
+      await ctx.close();
+    }
+  });
+  await check("мини-апп: экран загрузки и сигнал Telegram видны до доставки JS и CSS", async () => {
+    const ctx = await mob(390);
+    let releaseAssets;
+    const pendingAssets = new Promise((resolve) => { releaseAssets = resolve; });
+    try {
+      const page = await ctx.newPage();
+      await page.route(/\/app\/assets\/index-[^/]+\.(?:js|css)$/, async (route) => {
+        await pendingAssets;
+        await route.continue();
+      });
+      await page.goto(miniUrl(W1), { waitUntil: "commit" });
+      await page.getByText("Открываем смены…", { exact: true }).waitFor({ timeout: 5000 });
+      await page.waitForFunction(() => window.openingReady === true, undefined, { timeout: 5000 });
+      assert(!(await page.getByText("Приложение не открылось").isVisible()), "загрузка показана как сбой");
+      releaseAssets();
+      await page.getByRole("button", { name: "Сервисы", exact: true }).waitFor();
+      assert(!(await page.getByText("Открываем смены…").isVisible()), "стартовая заглушка не убралась");
+    } finally {
+      releaseAssets();
+      await ctx.close();
+    }
+  });
+  await check("мини-апп: недоступный файл запуска → кнопка повтора → график", async () => {
+    const ctx = await mob(390);
+    try {
+      const page = await ctx.newPage();
+      const reports = [];
+      await page.route("**/api/client-error", (route) => {
+        reports.push(route.request().postDataJSON());
+        return route.fulfill({ status: 204 });
+      });
+      await page.route(/\/app\/assets\/index-[^/]+\.js$/, (route) => route.abort(), { times: 1 });
+      await page.goto(miniUrl(W1), { waitUntil: "commit" });
+      await page.getByRole("heading", { name: "Приложение не открылось" }).waitFor({ timeout: 5000 });
+      await page.getByRole("button", { name: "Повторить" }).click();
+      await page.getByRole("button", { name: "Сервисы", exact: true }).waitFor();
+      assert(reports.length === 1 && reports[0].reason === "Не загрузился файл приложения", "нет точного отчёта о файле");
+      assert(reports[0].url === `${BASE}/app/`, "отчёт содержит данные запуска");
+    } finally {
+      await ctx.close();
+    }
+  });
+  await check("мини-апп: QR с логотипом отправляется ботом и открывается с сохранённым стилем", async () => {
+    const ctx = await mob(320);
+    try {
+      const page = await ctx.newPage();
+      await page.goto(miniUrl(W1));
+      await page.getByRole("button", { name: "Сервисы", exact: true }).click();
+      await page.getByText("QR-код", { exact: true }).click();
+      await page.getByPlaceholder("https://…").fill("https://example.com/qr");
+      const image = page.getByAltText("Предпросмотр QR-кода");
+      await image.waitFor();
+      const plain = await image.getAttribute("src");
+      const logo = page.getByRole("checkbox", { name: "Логотип Сбера" });
+      await logo.check();
+      assert(plain !== await image.getAttribute("src"), "логотип не поменял QR");
+      const uploadsBefore = tg.calls.filter((call) => call.method === "sendPhoto").length;
+      await page.getByRole("button", { name: "Прислать мне в бота" }).click();
+      await page.getByRole("status").filter({ hasText: "Отправил" }).waitFor();
+      assert(tg.calls.filter((call) => call.method === "sendPhoto").length === uploadsBefore + 1, "нет одного фото в Bot API");
+      const me = await j("GET", "/api/me", { token: state.w1 });
+      assert(me.data.qrStyle?.logo === "sber", "стиль не сохранён");
+      await page.getByRole("button", { name: "Назад", exact: true }).click();
+      await page.getByText("QR-код", { exact: true }).click();
+      await logo.waitFor();
+      assert(await logo.isChecked(), "потерян сохранённый логотип");
+    } finally {
       await ctx.close();
     }
   });

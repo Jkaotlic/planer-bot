@@ -163,8 +163,7 @@ describe("тревога про выходной без ответа", () => {
       expect(declineOffer(db, assignmentId, igor.id, "2026-10-02").ok).toBe(true);
       const again = assignSlot(db, slot.id, igor.id, "2026-10-02");
       if (!again.ok) throw new Error(String(again.reason));
-      expect(again.assignment.id).toBe(assignmentId);
-      offeredAt(db, assignmentId, momentOf("2026-10-02", "10:00"));
+      offeredAt(db, again.assignment.id, momentOf("2026-10-02", "10:00"));
       const { bot: b, sent } = bot();
       // От первого предложения половина прошла ещё 01.10 в 22:00; от второго — нет.
       await tick(db, b, "2026-10-02", "10:05");

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   DEFAULT_QR_STYLE,
   QR_CAPTION_MAX,
@@ -31,8 +31,13 @@ export function QrScreen() {
     () => Object.fromEntries(QR_SHAPES.map((shape) => [shape, qrDataUrl(renderQrSvg("QR", { shape, color: style.color }))])),
     [style.color],
   );
-  // Ссылка на прежний результат под новым кодом вводила бы в заблуждение: сообщение — про то, что было.
-  useEffect(() => setNotice(null), [text, caption, style]);
+  const editVersion = useRef(0);
+  // Копирование может закончиться после правки. Его результат относится к прежней картинке.
+  function edit(change: () => void) {
+    editVersion.current += 1;
+    setNotice(null);
+    change();
+  }
   // Ref, а не state: второй клик может прийти раньше перерисовки, а растеризация идёт десятки миллисекунд.
   const busy = useRef(false);
 
@@ -45,12 +50,13 @@ export function QrScreen() {
 
   async function download() {
     if (busy.current) return;
+    const version = editVersion.current;
     busy.current = true;
     setNotice(null);
     try {
       downloadBlob(await png(), qrFileName(full.caption));
     } catch {
-      setNotice({ ok: false, text: FAILED });
+      if (editVersion.current === version) setNotice({ ok: false, text: FAILED });
     } finally {
       busy.current = false;
     }
@@ -58,15 +64,18 @@ export function QrScreen() {
 
   async function copy() {
     if (busy.current) return;
+    const version = editVersion.current;
     busy.current = true;
     setNotice(null);
     try {
       // png() зовётся синхронно в обработчике нажатия: см. copyPngToClipboard.
       const res = await copyPngToClipboard(png());
-      setNotice(res.ok ? { ok: true, text: "Картинка скопирована — вставь её в чат или документ." } : { ok: false, text: res.message });
+      if (editVersion.current === version) {
+        setNotice(res.ok ? { ok: true, text: "Картинка скопирована — вставь её в чат или документ." } : { ok: false, text: res.message });
+      }
     } catch {
       // renderQr бросает синхронно, до промиса, — без этого отказ ушёл бы необработанным.
-      setNotice({ ok: false, text: FAILED });
+      if (editVersion.current === version) setNotice({ ok: false, text: FAILED });
     } finally {
       busy.current = false;
     }
@@ -81,7 +90,7 @@ export function QrScreen() {
         <div className="qr-form">
           <label className="field-group">
             <span className="field-label">Ссылка или текст</span>
-            <textarea className="qr-text" rows={3} placeholder="https://…" value={text} onChange={(e) => setText(e.target.value)} />
+            <textarea className="qr-text" rows={3} placeholder="https://…" value={text} onChange={(e) => edit(() => setText(e.target.value))} />
           </label>
           {preview.kind === "error" && (
             <div role="alert" className="employees-error">
@@ -94,7 +103,7 @@ export function QrScreen() {
               checked={style.logo === "sber"}
               onChange={(event) => {
                 const checked = event.target.checked;
-                setStyle((s) => ({ ...s, logo: checked ? "sber" : undefined }));
+                edit(() => setStyle((s) => ({ ...s, logo: checked ? "sber" : undefined })));
               }}
             />
             Логотип Сбера
@@ -108,7 +117,7 @@ export function QrScreen() {
                   type="button"
                   className="btn btn-secondary qr-shape"
                   aria-pressed={style.shape === shape}
-                  onClick={() => setStyle((s) => ({ ...s, shape }))}
+                  onClick={() => edit(() => setStyle((s) => ({ ...s, shape })))}
                 >
                   <img src={samples[shape]} alt="" aria-hidden="true" className="qr-shape-sample" />
                   {QR_SHAPE_LABELS[shape]}
@@ -127,7 +136,7 @@ export function QrScreen() {
                   aria-label={QR_COLORS[color].label}
                   title={QR_COLORS[color].label}
                   aria-pressed={style.color === color}
-                  onClick={() => setStyle((s) => ({ ...s, color }))}
+                  onClick={() => edit(() => setStyle((s) => ({ ...s, color })))}
                   style={{ background: QR_COLORS[color].hex }}
                 />
               ))}
@@ -137,7 +146,7 @@ export function QrScreen() {
             <span className="field-label">
               Подпись под кодом — по желанию, до {QR_CAPTION_MAX} знаков · {caption.length}/{QR_CAPTION_MAX}
             </span>
-            <input type="text" maxLength={QR_CAPTION_MAX} placeholder="Например, «Сбор на кофемашину»" value={caption} onChange={(e) => setCaption(e.target.value)} />
+            <input type="text" maxLength={QR_CAPTION_MAX} placeholder="Например, «Сбор на кофемашину»" value={caption} onChange={(e) => edit(() => setCaption(e.target.value))} />
             {captionHasUnsupportedChars(caption) && <span className="qr-caption-hint">Эмодзи и иероглифы в подпись не попадут — их не нарисует картинка для бота</span>}
           </label>
         </div>

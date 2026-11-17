@@ -78,4 +78,24 @@ describe("отказ входа виден в логе", () => {
     expect(warn).not.toHaveBeenCalled();
     warn.mockRestore();
   });
+
+  it("при JSON null принимает подписанные данные из заголовка", async () => {
+    const db = makeTestDb();
+    const { createEmployee, linkTelegramAccount } = await import("../repo/employees");
+    createEmployee(db, { displayName: "Аня", inviteToken: "i1" });
+    linkTelegramAccount(db, "i1", 555_222);
+    const app = createApp({ db, config });
+
+    const res = await app.request("/api/auth", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Init-Data": initDataFor(555_222, Math.floor(Date.now() / 1000)),
+      },
+      body: "null",
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ employee: { displayName: "Аня" } });
+  });
 });

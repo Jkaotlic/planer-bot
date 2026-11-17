@@ -138,6 +138,19 @@ describe("экран «QR-код»", () => {
     expect(el.textContent).toContain("Не чаще раза в 5 секунд");
   });
 
+  it("результат отправки прежнего QR не показывается под изменённым кодом", async () => {
+    let finish!: () => void;
+    vi.spyOn(apiClient, "sendQrToMe").mockReturnValue(new Promise<void>((resolve) => { finish = resolve; }));
+    const { el } = await render();
+    const field = el.querySelector("textarea")!;
+    await type(field, "https://example.com");
+    await act(async () => button(el, "Прислать мне в бота").click());
+    await type(field, "https://example.org");
+    await act(async () => finish());
+    expect(el.querySelector('[role="status"]')).toBeNull();
+    expect(button(el, "Прислать мне в бота").disabled).toBe(false);
+  });
+
   it("уход с изменённым стилем сохраняет форму и цвет; без изменений — запроса нет", async () => {
     const save = vi.spyOn(apiClient, "setQrStyle").mockResolvedValue({ shape: "soft", color: "black" });
     const first = await render();

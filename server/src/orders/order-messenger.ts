@@ -12,6 +12,7 @@ import type { TeamClock } from "../polls/poll-service";
 import { menuForOrder } from "./place-service";
 import { hasDeclined, itemsOf, orderRecipientRows, setOrderMessageId } from "./order-service";
 import { unpaidDebtors } from "./order-payment-service";
+import { queueFoodCloseMessages, type FoodCloseMessage, type FoodCloseReason } from "../food/food-close-delivery";
 
 /**
  * Кнопки заказа. Одна функция на рассылку и на правку после тапа — строки
@@ -84,8 +85,7 @@ export function orderMenu(db: Db, order: FoodOrder) {
  * Письмо печатает «Твой заказ», и без правки оно врало бы до следующего тапа
  * в чате. Косметика: ошибки (письмо удалено, «message is not modified») — в
  * лог, наружу ничего не бросается, и вызывающий её не ждёт. Закрытый заказ
- * не трогаем: его кнопки уже погасил `finishOrderMessages`, и правка с
- * клавиатурой вернула бы их.
+ * не трогаем: снятие кнопок уже поставлено в очередь.
  */
 export async function redrawOrderMessage(
   bot: Bot, db: Db, order: FoodOrder, employeeId: number, now: TeamClock, publicUrl: string,
@@ -155,25 +155,24 @@ export async function sendOrderInvites(bot: Bot, db: Db, order: FoodOrder, now: 
  * сдавшим»; каждому, кто должен, — сколько, кому и «Я сдал». Отказавшимся и
  * самому запускающему «сдай» не уходит: долга у них нет.
  */
-export async function finishOrderMessages(
-  bot: Bot, db: Db, order: FoodOrder, reason: "closed" | "cancelled", _publicUrl: string,
-): Promise<void> {
+export function queueOrderCloseMessages(db: Db, order: FoodOrder, reason: FoodCloseReason): void {
   const { rows: all, byId } = names(db, order);
   // Имена — всех (сводка называет и архивного должника), письма — только тем,
   // кто ещё в команде.
   const rows = all.filter((r) => r.isActive);
+  const messages: FoodCloseMessage[] = [];
   for (const r of rows) {
     if (r.telegramUserId == null || r.messageId == null) continue;
-    try {
-      await bot.api.editMessageReplyMarkup(r.telegramUserId, r.messageId, { reply_markup: new InlineKeyboard() });
-    } catch (err) {
-      console.error("order: cosmetic edit failed:", safeErrorMessage(err));
-    }
+    messages.push({ employeeId: r.employeeId, telegramUserId: r.telegramUserId, messageId: r.messageId });
   }
   const place = placeName(db, order);
   if (reason === "cancelled") {
     const what = order.title ? `Сбор «${order.title}»` : `Заказ${place ? ` из «${place}»` : ""}`;
-    for (const r of rows) if (r.telegramUserId != null) await notifyUser(bot, r.telegramUserId, `🚫 ${what} отменён.`);
+    for (const r of rows) {
+      if (r.telegramUserId == null) continue;
+      messages.push({ employeeId: r.employeeId, telegramUserId: r.telegramUserId, body: `🚫 ${what} отменён.` });
+    }
+    queueFoodCloseMessages(db, `order:${order.id}`, messages);
     return;
   }
   const items = itemsOf(db, order.id);
@@ -184,12 +183,24 @@ export async function finishOrderMessages(
     // после «Итого».
     const parts = splitAtLines(organizerSummaryText({ title: order.title, placeName: place, items, names: byId }));
     for (const [i, part] of parts.entries()) {
-      await notifyUser(bot, creator.telegramUserId, part, i === parts.length - 1 ? remindKeyboard(order.id) : undefined);
+      messages.push({
+        employeeId: creator.employeeId,
+        telegramUserId: creator.telegramUserId,
+        body: part,
+        keyboard: i === parts.length - 1 ? remindKeyboard(order.id) : undefined,
+      });
     }
   }
   for (const d of debtors(items, order.createdBy)) {
     const tg = rows.find((r) => r.employeeId === d.employeeId)?.telegramUserId;
     if (tg == null) continue;
-    await notifyUser(bot, tg, payRequestText({ creatorName: byId.get(order.createdBy) ?? "Коллега", title: order.title, placeName: place, amount: d.amount, payHint: order.payHint }), payKeyboard(order.id));
+    messages.push({
+      employeeId: d.employeeId,
+      telegramUserId: tg,
+      body: payRequestText({ creatorName: byId.get(order.createdBy) ?? "Коллега", title: order.title, placeName: place, amount: d.amount, payHint: order.payHint }),
+      keyboard: payKeyboard(order.id),
+      paymentOrderId: order.id,
+    });
   }
+  queueFoodCloseMessages(db, `order:${order.id}`, messages);
 }

@@ -79,21 +79,25 @@ export function fakeTelegram(port) {
         waiters.push(flush);
         return;
       }
-      calls.push({ method, body, at: Date.now() });
+      const call = { method, body, at: Date.now() };
+      calls.push(call);
       if (failFor.has(body.chat_id)) {
         res.statusCode = 403;
         return send({ ok: false, error_code: 403, description: "Forbidden: bot was blocked by the user" });
       }
-      if (/^send/.test(method))
+      if (/^send/.test(method)) {
+        call.messageId = ++msgId;
+        call.messageDate = Math.floor(Date.now() / 1000);
         return send({
           ok: true,
           result: {
-            message_id: ++msgId,
-            date: Math.floor(Date.now() / 1000),
+            message_id: call.messageId,
+            date: call.messageDate,
             chat: { id: Number(body.chat_id) || 1, type: "private" },
             text: body.text ?? "",
           },
         });
+      }
       if (/^edit/.test(method))
         return send({
           ok: true,

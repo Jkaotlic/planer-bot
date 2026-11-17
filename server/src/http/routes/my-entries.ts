@@ -41,8 +41,11 @@ import {
 } from "../../handover/handover-service";
 import {
   editClosedRequest,
-  reconcilePendingDateEdit,
+  announcePendingDateEdit,
+  reconcilePendingDateEditDb,
   requestApproval,
+  requestApprovalDb,
+  sendApprovalRequest,
   sickApprovalDeps,
   takeRequestOutOfPending,
   type SickApprovalDeps,
@@ -247,52 +250,55 @@ export function createMyEntryRoutes(deps: { db: Db; config: Config; bot?: Bot })
     const shape = shapeError(body);
     if (shape) return c.json({ error: shape }, 400);
 
-    const before = entryAuditPayload(db, existing);
-    const updated = updateShift(db, existing.id, rowFor(body));
-    if (!updated) return c.json({ error: "not_found" }, 404);
-
-    recordAudit(db, "self_entry_updated", employeeId, { before, after: entryAuditPayload(db, updated) });
     // Decided BEFORE anything else: `existing` is the only record of the old span and of
     // whether the request was still open.
     const wasPending = existing.approvalRequestedAt != null;
-    let asked = false;
+    const approval = approvalDeps();
+    const change = db.transaction(() => {
+      const before = entryAuditPayload(db, existing);
+      const updated = updateShift(db, existing.id, rowFor(body));
+      if (!updated) return null;
+      recordAudit(db, "self_entry_updated", employeeId, { before, after: entryAuditPayload(db, updated) });
+      if (updated.category !== "sick_leave") return { updated, cancelled: [], pendingEdit: null, requested: null };
+
+      // Сохраняем новые даты, отменяем передачи выпавших дней и меняем запрос
+      // на ОК до отправки сообщений. Иначе отказ админа успевал вернуть дни,
+      // которые человек уже снял, пока Telegram принимал письмо об отмене.
+      const covered = eachDayIso(updated.date, updated.endDate ?? updated.date);
+      const cancelled = cancelHandoversForEntryDb(db, updated.id, covered);
+      const pendingEdit = wasPending ? reconcilePendingDateEditDb(db, existing, updated) : null;
+      const oldDays = new Set(eachDayIso(existing.date, existing.endDate ?? existing.date));
+      const extended = covered.some((date) => !oldDays.has(date));
+      const requested = !wasPending && extended && !me.isAdmin
+        ? requestApprovalDb(approval, updated, sickSpanIntersection(existing, updated))
+        : null;
+      return { updated, cancelled, pendingEdit, requested };
+    });
+    if (!change) return c.json({ error: "not_found" }, 404);
+    const { updated, cancelled, pendingEdit, requested } = change;
+    await notifyCancelledHandovers(handoverDeps(), cancelled);
+
     // Set when a withdrawn extension also shortened the approved span: the admins' letter is
     // closed, so they would otherwise never learn the approved days got fewer.
     let noticeBefore: typeof existing | null = null;
-    if (updated.category === "sick_leave") {
-      // Порядок важен: сперва гасим дни, которые больничный больше не покрывает,
-      // потом открываем те, до которых он теперь дотянулся.
-      const covered = eachDayIso(updated.date, updated.endDate ?? updated.date);
-      // `cancelHandoversForEntry` — БЕЗУСЛОВНО, не под `!me.isObserver`. Роль
-      // закрывает ЗАПУСК лестницы, а не её уборку: если лестница когда-то
-      // поднялась (человек был обычным работником), укороченный больничный
-      // обязан погасить дни, о которых людям уже написали, — независимо от
-      // того, кем этот человек стал с тех пор.
-      await cancelHandoversForEntry(handoverDeps(), updated.id, covered);
-      const before = new Set(eachDayIso(existing.date, existing.endDate ?? existing.date));
-      // «Удлинить» = the edit reaches a day the approved span did not. Moving the start
-      // later is a shortening; moving the whole span is both, and the new days need an «ОК».
-      const extended = covered.some((date) => !before.has(date));
-      if (wasPending) {
-        // Withdrawn extension or redrawn letters: the same decision an admin's date edit gets.
-        if ((await reconcilePendingDateEdit(approvalDeps(), existing, updated)) === "withdrawn") {
-          const approvedSpan = { date: existing.approvedDate!, endDate: existing.approvedEndDate };
-          const approvedSize = eachDayIso(approvedSpan.date, approvedSpan.endDate ?? approvedSpan.date).length;
-          if (covered.length < approvedSize) noticeBefore = { ...existing, date: approvedSpan.date, endDate: approvedSpan.endDate };
-        }
-      } else if (extended && !me.isAdmin) {
-        // Hand-overs for the old days keep running; the new days wait (spec item 13). The
-        // approved span is remembered: a «Отклонить» gives the row back as it was.
-        // Only the days of it that survive the edit: a day the worker dropped is not given back.
-        await requestApproval(approvalDeps(), updated, sickSpanIntersection(existing, updated));
-        asked = true;
-      } else if (!me.isObserver) {
-        // НОВУЮ лестницу для наблюдателя запускать по-прежнему нельзя — гейт роли, см. POST.
-        await startHandovers(handoverDeps(), { sickEntry: updated, employeeId });
+    if (pendingEdit) {
+      await announcePendingDateEdit(approval, pendingEdit);
+      if (pendingEdit.kind === "withdrawn") {
+        const approvedSpan = { date: existing.approvedDate!, endDate: existing.approvedEndDate };
+        const approvedSize = eachDayIso(approvedSpan.date, approvedSpan.endDate ?? approvedSpan.date).length;
+        const newSize = eachDayIso(updated.date, updated.endDate ?? updated.date).length;
+        if (newSize < approvedSize) noticeBefore = { ...existing, date: approvedSpan.date, endDate: approvedSpan.endDate };
+      }
+    } else if (requested) {
+      await sendApprovalRequest(approval, requested);
+    } else if (updated.category === "sick_leave" && !me.isObserver) {
+      const current = getShift(db, updated.id);
+      if (current?.category === "sick_leave" && current.approvalRequestedAt == null && current.employeeId === employeeId) {
+        await startHandovers(handoverDeps(), { sickEntry: current, employeeId });
       }
     }
     // A pending or re-asked sick leave already has its one letter (the request).
-    if (bot && ((!wasPending && !asked) || noticeBefore)) {
+    if (bot && ((!wasPending && !requested) || noticeBefore)) {
       // См. комментарий у POST: тот же выбор вида по роли, тот же повод.
       const noticeKind = me.isObserver ? "observer_entries" : "self_entries";
       const lines = updated.category === "shift" ? [] : riskLines(employeeId, updated);

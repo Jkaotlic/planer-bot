@@ -3,12 +3,15 @@ import { existsSync, mkdtempSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp } from "./app";
-import { MAX_DOC_BYTES, safeDocName } from "./checklist-doc";
+import { MAX_DOC_BYTES, safeDocName } from "../checklists/document";
 import { makeTestDb } from "../db/testdb";
 import { createChecklist, getChecklist, updateChecklist } from "../repo/checklists";
-import { createEmployee, linkTelegramAccount } from "../repo/employees";
+import { createEmployee, getByTelegramId, linkTelegramAccount } from "../repo/employees";
 import { signInitData } from "../auth/telegram";
 import { testConfig } from "../test-config";
+import { createBot } from "../bot/bot";
+import { recordApi, stubBotInfo } from "../bot/testbot";
+import { startDocPending } from "../bugs/doc-pending";
 
 /**
  * Загрузка файла инструкции из браузера.
@@ -99,6 +102,22 @@ describe("POST /api/admin/checklists/:id/doc", () => {
     expect(existsSync(getChecklist(db, list.id)!.docPath!)).toBe(true);
   });
 
+  it("замена содержимого файла с тем же именем создаёт отдельную версию", async () => {
+    const { db, app, list } = stage();
+    const token = await tokenFor(app, 111);
+    const resource = `/api/admin/checklists/${list.id}/doc`;
+    await app.request(resource, upload(token, 256));
+    const first = getChecklist(db, list.id)!.docPath!;
+
+    await app.request(resource, upload(token, 512));
+
+    const saved = getChecklist(db, list.id)!;
+    expect(saved.docPath).not.toBe(first);
+    expect(existsSync(first)).toBe(false);
+    expect(statSync(saved.docPath!).size).toBe(512);
+    expect(saved.docName).toBe("Инструкция.pdf");
+  });
+
   it("удаление файла убирает его и с диска", async () => {
     const { db, app, list } = stage();
     const token = await tokenFor(app, 111);
@@ -109,6 +128,21 @@ describe("POST /api/admin/checklists/:id/doc", () => {
 
     expect(existsSync(path)).toBe(false);
     expect(getChecklist(db, list.id)!.docPath).toBeNull();
+  });
+
+  it("удаление всего чек-листа убирает его локальную инструкцию", async () => {
+    const { db, app, list } = stage();
+    const token = await tokenFor(app, 111);
+    await app.request(`/api/admin/checklists/${list.id}/doc`, upload(token, 256));
+    const path = getChecklist(db, list.id)!.docPath!;
+
+    const res = await app.request(`/api/admin/checklists/${list.id}`, {
+      method: "DELETE", headers: { Authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    expect(getChecklist(db, list.id)).toBeUndefined();
+    expect(existsSync(path)).toBe(false);
   });
 
   it("не пускает работника", async () => {
@@ -134,5 +168,79 @@ describe("POST /api/admin/checklists/:id/doc", () => {
     const { app } = stage();
     const res = await app.request("/api/admin/checklists/9999/doc", upload(await tokenFor(app, 111), 64));
     expect(res.status).toBe(404);
+  });
+});
+
+describe("инструкция из двух интерфейсов", () => {
+  it.each(["javascript:void(0)", "просто текст", "/docs/file.pdf", "https://"])(
+    "не сохраняет ссылку, которую нельзя открыть из Telegram — %s",
+    async (docUrl) => {
+      const { db, app, list } = stage();
+      const token = await tokenFor(app, 111);
+
+      const res = await app.request(`/api/admin/checklists/${list.id}`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ docUrl }),
+      });
+
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({ error: expect.stringContaining("Ссылка") });
+      expect(getChecklist(db, list.id)?.docUrl).toBeNull();
+    },
+  );
+
+  it("сохраняет ссылку на инструкцию внутри Telegram", async () => {
+    const { db, app, list } = stage();
+    const token = await tokenFor(app, 111);
+    const docUrl = "tg://resolve?domain=example";
+
+    const res = await app.request(`/api/admin/checklists/${list.id}`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ docUrl }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(getChecklist(db, list.id)?.docUrl).toBe(docUrl);
+  });
+
+  it("снятие файла в боте убирает приложенную через браузер инструкцию", async () => {
+    const { db, app, list } = stage();
+    await app.request(`/api/admin/checklists/${list.id}/doc`, upload(await tokenFor(app, 111), 256));
+    const path = getChecklist(db, list.id)!.docPath!;
+    const bot = stubBotInfo(createBot({ db, config }));
+    const { answers } = recordApi(bot);
+    const from = { id: 111, is_bot: false, first_name: "Аня" };
+
+    await bot.handleUpdate({
+      update_id: 1,
+      callback_query: {
+        id: "1", from, chat_instance: "test", data: `checklist:docclear:${list.id}`,
+        message: { message_id: 1, date: 1, chat: { id: from.id, type: "private", first_name: from.first_name } },
+      },
+    });
+
+    expect(answers).toContain("Убрал");
+    expect(getChecklist(db, list.id)).toMatchObject({ docName: null, docFileId: null, docPath: null });
+    expect(existsSync(path)).toBe(false);
+  });
+
+  it("документ из бота заменяет ранее приложенный через браузер файл", async () => {
+    const { db, app, list } = stage();
+    await app.request(`/api/admin/checklists/${list.id}/doc`, upload(await tokenFor(app, 111), 256));
+    const path = getChecklist(db, list.id)!.docPath!;
+    const bot = stubBotInfo(createBot({ db, config }));
+    recordApi(bot);
+    const from = { id: 111, is_bot: false, first_name: "Аня" };
+    startDocPending(db, getByTelegramId(db, from.id)!.id, list.id);
+
+    await bot.handleUpdate({ update_id: 1, message: {
+      message_id: 1, date: 1, from, chat: { id: from.id, type: "private", first_name: from.first_name },
+      document: { file_id: "new-document", file_unique_id: "test", file_name: "Новое.pdf" },
+    } });
+
+    expect(getChecklist(db, list.id)).toMatchObject({ docName: "Новое.pdf", docFileId: "new-document", docPath: null });
+    expect(existsSync(path)).toBe(false);
   });
 });

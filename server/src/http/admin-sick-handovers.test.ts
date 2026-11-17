@@ -36,7 +36,7 @@ function worker(db: Db, name: string, tgId: number) {
   return w;
 }
 
-function fakeBot() {
+function fakeBot(beforeEdit?: (messageId: number) => Promise<void>) {
   const sent: { to: number; text: string }[] = [];
   const edits: { chat: number; text: string }[] = [];
   const bot = {
@@ -45,7 +45,8 @@ function fakeBot() {
         sent.push({ to, text });
         return { message_id: sent.length };
       }),
-      editMessageText: vi.fn(async (chat: number, _message: number, text: string) => {
+      editMessageText: vi.fn(async (chat: number, message: number, text: string) => {
+        await beforeEdit?.(message);
         edits.push({ chat, text });
         return true;
       }),
@@ -69,13 +70,13 @@ function expectAdminCancelText(sent: { to: number; text: string }[]) {
 const day = (offset: number) => addDaysIso(teamNow(config.teamTz).date, offset);
 
 /** Anya is on a sick leave tomorrow with a live fan-out for her shift; Marat is the colleague who could take it. */
-async function scene(opts: { pending: boolean }) {
+async function scene(opts: { pending: boolean; beforeEdit?: (messageId: number) => Promise<void> }) {
   const db = makeTestDb();
   const anya = worker(db, "Аня", 401);
   const igor = worker(db, "Игорь", 402);
   setEmployeeAdmin(db, igor.id, true);
   const marat = worker(db, "Марат", 403);
-  const { bot, sent, edits } = fakeBot();
+  const { bot, sent, edits } = fakeBot(opts.beforeEdit);
   const app = createApp({ db, config, bot });
   const sick = createShift(db, {
     date: day(1), category: "sick_leave", employeeId: anya.id,
@@ -334,6 +335,34 @@ describe("an admin replaces sick days with work through the range", () => {
     expect(piece.approvalRequestedAt).not.toBeNull();
     // Кнопки второго куска — свои: решение по первому не должно решать и его.
     expect(sent.filter((m) => m.to === 402)).toHaveLength(1);
+  });
+
+  it("a split piece approved while the first letter is being redrawn stays approved", async () => {
+    let entered!: () => void;
+    let release!: () => void;
+    const redrawing = new Promise<void>((resolve) => { entered = resolve; });
+    const editAnyway = new Promise<void>((resolve) => { release = resolve; });
+    const { db, app, sent, sick, anya, igorToken } = await scene({
+      pending: true,
+      beforeEdit: async (messageId) => {
+        if (messageId !== 77) return;
+        entered();
+        await editAnyway;
+      },
+    });
+    db.update(shiftsTable).set({ endDate: day(3) }).where(eq(shiftsTable.id, sick.id)).run();
+    addApprovalMessage(db, sick.id, 402, 77);
+
+    const replacing = replace(app, igorToken, anya.id, day(2));
+    await redrawing;
+    const piece = db.select().from(shiftsTable).where(eq(shiftsTable.date, day(3))).all().find((row) => row.category === "sick_leave")!;
+    const approval = await app.request(`/api/admin/sick-approvals/${piece.id}/approve`, authed(igorToken));
+    release();
+
+    expect(approval.status).toBe(200);
+    expect((await replacing).status).toBe(201);
+    expect(getShift(db, piece.id)).toMatchObject({ approvalRequestedAt: null, approvedByEmployeeId: expect.any(Number) });
+    expect(sent.filter((message) => message.to === 402)).toHaveLength(0);
   });
 
   // Путь `wholly` в cutAbsenceDb: заявка ждёт «ОК» только на раздвинутый назад

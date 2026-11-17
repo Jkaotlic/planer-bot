@@ -36,7 +36,7 @@ export class CrashBoundary extends Component<Props, State> {
       body: JSON.stringify({
         reason: `экран упал: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`,
         userAgent: navigator.userAgent,
-        url: `${location.pathname}${location.search}`,
+        url: location.pathname,
         componentStack: info.componentStack?.slice(0, 400),
       }),
     }).catch(() => {

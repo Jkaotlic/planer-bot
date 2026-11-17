@@ -1,5 +1,9 @@
+import { randomUUID } from "node:crypto";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { Db } from "../db/client";
+import type { Checklist } from "../db/schema";
+import { updateChecklist } from "../repo/checklists";
 
 /**
  * Потолок файла инструкции.
@@ -10,6 +14,16 @@ import { join } from "node:path";
  * процесса, который обслуживает и API, и long-polling бота.
  */
 export const MAX_DOC_BYTES = 5 * 1024 * 1024;
+
+/** Ссылку открывают и браузер, и кнопка Telegram, поэтому адрес должен быть абсолютным. */
+export function checklistDocumentUrl(value: string | null): string | null {
+  if (!value || !/^(?:https?|tg):\/\/[^/\\\s][^\\\s]*$/i.test(value)) return null;
+  try {
+    return new URL(value).hostname ? value : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Имя файла, пришедшее из браузера, — это ввод пользователя, а не имя файла.
@@ -24,16 +38,12 @@ export function safeDocName(raw: string): string {
   return base.length > 0 ? base.slice(0, 120) : "Инструкция";
 }
 
-/** Куда лечь файлу этого чек-листа. Каталог на чек-лист — чтобы имена не сталкивались. */
-export function checklistDocPath(docsDir: string, checklistId: number, name: string): string {
-  return join(docsDir, String(checklistId), name);
-}
-
-/** Пишет файл, создавая каталог. Возвращает путь, который лёг в базу. */
-export function writeChecklistDoc(docsDir: string, checklistId: number, name: string, bytes: Uint8Array): string {
-  const path = checklistDocPath(docsDir, checklistId, name);
-  mkdirSync(join(docsDir, String(checklistId)), { recursive: true });
-  writeFileSync(path, bytes);
+/** У каждой загрузки свой путь, чтобы запоздалый ответ Telegram не вернул старый file_id. */
+export function writeChecklistDoc(docsDir: string, checklistId: number, bytes: Uint8Array): string {
+  const dir = join(docsDir, String(checklistId));
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, randomUUID());
+  writeFileSync(path, bytes, { flag: "wx" });
   return path;
 }
 
@@ -44,5 +54,26 @@ export function writeChecklistDoc(docsDir: string, checklistId: number, name: st
  * запись в базе всё равно надо привести в порядок.
  */
 export function removeChecklistDoc(path: string | null | undefined): void {
-  if (path) rmSync(path, { force: true });
+  if (!path) return;
+  try {
+    rmSync(path, { force: true });
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code ?? "unknown";
+    console.error("Не удалось удалить локальный файл инструкции:", code);
+  }
+}
+
+export function setChecklistDocument(
+  db: Db,
+  list: Pick<Checklist, "id" | "docPath">,
+  document: Pick<Checklist, "docPath" | "docName" | "docFileId">,
+): void {
+  try {
+    updateChecklist(db, list.id, document);
+  } catch (error) {
+    removeChecklistDoc(document.docPath);
+    throw error;
+  }
+  // Пока новая ссылка не записана, старая должна вести на существующий файл.
+  removeChecklistDoc(list.docPath);
 }

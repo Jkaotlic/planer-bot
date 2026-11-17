@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { Bot } from "grammy";
 import { z } from "zod";
 import {
-  FOOD_CLOSE_HORIZON_DAYS, FOOD_NOTE_MAX, FOOD_QTY_MAX, FOOD_TEXT_MAX, qtyLimitText, dateStr, isFutureClose, isWithinCloseHorizon, orderItemInputSchema, orderTotal, teamAudienceSchema, timeStr,
+  FOOD_CLOSE_HORIZON_DAYS, FOOD_NOTE_MAX, FOOD_QTY_MAX, FOOD_TEXT_MAX, qtyLimitText, dateStr, isFutureClose, isWithinCloseHorizon, orderItemInputSchema, teamAudienceSchema, timeStr,
 } from "@planer/shared";
 import type { Config } from "../../config";
 import type { Db } from "../../db/client";
@@ -15,11 +15,13 @@ import { requireAuth, type Env } from "../middleware";
 import { jsonBody } from "../json-body";
 import { getPlaceView } from "../../orders/place-service";
 import {
-  addCustomItem, addMenuItem, cancelOrder, closeOrder, createOrder, declineOrder, getOrder, hasRecentSameOrder, itemsOf, listOrdersFor,
+  addCustomItem, addMenuItem, createOrder, declineOrder, getOrder, hasRecentSameOrder, itemsOf, listOrdersFor,
   orderRecipientRows, orderView, removeItem, setItemQty,
 } from "../../orders/order-service";
 import { setOrderPaid } from "../../orders/order-payment-service";
-import { finishOrderMessages, placeName, redrawOrderMessage, remindUnpaid, sendOrderInvites } from "../../orders/order-messenger";
+import { redrawOrderMessage, remindUnpaid, sendOrderInvites } from "../../orders/order-messenger";
+import { closeOrderWithMessages } from "../../food/food-close";
+import { deliverFoodCloseMessages } from "../../food/food-close-delivery";
 
 /** Мини-апп показывает текст ошибки как есть — код «not_found» человеку ничего не скажет. */
 const NOT_FOUND = "Заказ не найден.";
@@ -245,13 +247,10 @@ export function createOrderRoutes(deps: { db: Db; config: Config; bot?: Bot }): 
     app.post(`/api/orders/:id/${action}`, auth, async (c) => {
       const v = visible(c);
       if (!v) return c.json({ error: NOT_FOUND }, 404);
-      const result = action === "close" ? closeOrder(db, v.order, v.viewer) : cancelOrder(db, v.order, v.viewer);
+      const result = closeOrderWithMessages(db, v.order, v.viewer, action === "close" ? "closed" : "cancelled");
       if (!result.ok) return c.json({ error: result.error }, 409);
       const fresh = getOrder(db, v.order.id)!;
-      recordAudit(db, action === "close" ? "order_closed" : "order_cancelled", v.viewer.id, {
-        orderId: fresh.id, placeName: placeName(db, fresh), total: orderTotal(itemsOf(db, fresh.id)),
-      });
-      if (bot) await finishOrderMessages(bot, db, fresh, action === "close" ? "closed" : "cancelled", config.publicUrl);
+      if (bot) await deliverFoodCloseMessages(db, bot, `order:${fresh.id}`);
       return c.json({ order: orderView(db, fresh, v.viewer, v.now) });
     });
   }

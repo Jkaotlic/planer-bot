@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 // Через `?raw`, а не через node:fs: в воркспейсе мини-аппа нет типов node, а
 // разметка нужна как текст — Vite отдаёт её ровно так.
 import html from "../index.html?raw";
@@ -38,6 +38,43 @@ describe("спасательный круг загрузки", () => {
     const code = inlineScript();
     expect(code).toContain("/api/client-error");
     expect(code).toMatch(/boot-fallback/);
+  });
+
+  it("показывает загрузку в самом HTML и не объявляет сбой на восьмой секунде", () => {
+    const shell = html.indexOf('id="boot-pending"');
+    expect(shell).toBeGreaterThan(-1);
+    expect(shell).toBeLessThan(html.indexOf('/src/main.tsx'));
+    const schedule = vi.fn();
+    const fakeWindow = { addEventListener() {}, setTimeout: schedule, setInterval() {} };
+    new Function("window", inlineScript())(fakeWindow);
+    expect(schedule.mock.calls.every(([, delay]) => delay > 9500)).toBe(true);
+  });
+
+  it("отправляет путь страницы без параметров и подписанных данных Telegram", () => {
+    const sent: Array<{ url: string }> = [];
+    let rescue: () => void = () => {};
+    const fakeWindow = {
+      addEventListener() {},
+      setTimeout(callback: () => void) { rescue = callback; },
+      setInterval() {},
+    };
+    const fakeDocument = {
+      getElementById: () => null,
+      createElement: () => ({ setAttribute() {}, querySelector: () => ({}) }),
+      body: { appendChild() {} },
+    };
+    const fakeLocation = new URL("https://example.com/app/?screen=my#tgWebAppData=synthetic");
+    class FakeRequest {
+      open() {}
+      setRequestHeader() {}
+      send(body: string) { sent.push(JSON.parse(body)); }
+    }
+    const run = new Function("window", "document", "location", "navigator", "XMLHttpRequest", inlineScript());
+    run(fakeWindow, fakeDocument, fakeLocation, { userAgent: "Telegram" }, FakeRequest);
+
+    rescue();
+
+    expect(sent).toEqual([expect.objectContaining({ url: "https://example.com/app/" })]);
   });
 
   // Каждый пункт ниже — реальный синтаксис, на котором старый движок бросает

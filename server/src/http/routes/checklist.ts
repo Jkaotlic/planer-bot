@@ -35,10 +35,10 @@ import { listShiftsOverlapping } from "../../repo/shifts";
 import { listActiveTemplates } from "../../repo/templates";
 import { getEmployeeById } from "../../repo/employees";
 import { recordAudit } from "../../repo/audit";
-import { checklistDayKey, checklistKind, reminderSentAt } from "../../repo/reminders";
+import { checklistKind, reminderSentAt } from "../../repo/reminders";
 import { teamNow, teamTimeAt } from "../../util/team-time";
 import { requireAdmin, requireAuth, type Env } from "../middleware";
-import { MAX_DOC_BYTES, removeChecklistDoc, safeDocName, writeChecklistDoc } from "../checklist-doc";
+import { checklistDocumentUrl, MAX_DOC_BYTES, removeChecklistDoc, safeDocName, setChecklistDocument, writeChecklistDoc } from "../../checklists/document";
 
 const nameSchema = z.object({ name: z.string().trim().min(1).max(CHECKLIST_NAME_MAX) });
 const titleSchema = z.object({ title: z.string().trim().min(1).max(CHECKLIST_ITEM_TITLE_MAX) });
@@ -103,6 +103,9 @@ export function createChecklistRoutes(db: Db, config: Config) {
     const id = Number(c.req.param("id"));
     const parsed = checklistPatchSchema.safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) return c.json({ error: "invalid", issues: parsed.error.issues }, 400);
+    if (parsed.data.docUrl && !checklistDocumentUrl(parsed.data.docUrl)) {
+      return c.json({ error: "Ссылка на инструкцию должна начинаться с https://, http:// или tg:// и содержать адрес" }, 400);
+    }
     if (!getChecklist(db, id)) return c.json({ error: "not_found" }, 404);
     updateChecklist(db, id, parsed.data);
     return c.json({ checklist: checklistView(db, id) });
@@ -113,6 +116,7 @@ export function createChecklistRoutes(db: Db, config: Config) {
     const list = getChecklist(db, id);
     if (list) {
       deleteChecklist(db, id);
+      removeChecklistDoc(list.docPath);
       recordAudit(db, "checklist_changed", c.get("auth").employeeId, { name: list.name, action: "deleted" });
     }
     return c.json({ checklists: allViews() });
@@ -126,8 +130,7 @@ export function createChecklistRoutes(db: Db, config: Config) {
    */
   app.post("/api/admin/checklists/:id/doc", requireAdmin(db, config.jwtSecret), async (c) => {
     const id = Number(c.req.param("id"));
-    const list = getChecklist(db, id);
-    if (!list) return c.json({ error: "not_found" }, 404);
+    if (!getChecklist(db, id)) return c.json({ error: "not_found" }, 404);
 
     const body = await c.req.parseBody();
     const file = body.file;
@@ -137,11 +140,12 @@ export function createChecklistRoutes(db: Db, config: Config) {
     }
 
     const name = safeDocName(file.name);
-    const path = writeChecklistDoc(config.docsDir, id, name, new Uint8Array(await file.arrayBuffer()));
-    // Прежний файл — с диска: иначе каталог копит все версии инструкции, а вслед
-    // за ним их копит и бэкап.
-    if (list.docPath && list.docPath !== path) removeChecklistDoc(list.docPath);
-    updateChecklist(db, id, { docPath: path, docName: name, docFileId: null });
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    // Пока загружался файл, чек-лист могли удалить или уже приложить другой файл.
+    const list = getChecklist(db, id);
+    if (!list) return c.json({ error: "not_found" }, 404);
+    const path = writeChecklistDoc(config.docsDir, id, bytes);
+    setChecklistDocument(db, list, { docPath: path, docName: name, docFileId: null });
     recordAudit(db, "checklist_doc_changed", c.get("auth").employeeId, {
       fileName: name, attached: true, checklistName: list.name,
     });
@@ -153,8 +157,7 @@ export function createChecklistRoutes(db: Db, config: Config) {
     const id = Number(c.req.param("id"));
     const list = getChecklist(db, id);
     if (!list) return c.json({ error: "not_found" }, 404);
-    removeChecklistDoc(list.docPath);
-    updateChecklist(db, id, { docFileId: null, docName: null, docPath: null });
+    setChecklistDocument(db, list, { docFileId: null, docName: null, docPath: null });
     return c.json({ checklist: checklistView(db, id) });
   });
 
@@ -234,16 +237,20 @@ export function createChecklistRoutes(db: Db, config: Config) {
       return (byTemplate.get(shift.templateId) ?? []).flatMap((checklistId) => {
       const key = `${employeeId}:${checklistId}`;
       if (seen.has(key)) return [];
+
+      const owner = getEmployeeById(db, employeeId);
+      // Многодневная запись — один ряд `shifts` на весь диапазон, и «ушло»
+      // спрашивается за КОНКРЕТНЫЙ запрошенный день, а не за весь диапазон разом.
+      const sentAt = reminderSentAt(db, shift.id, checklistKind(checklistId, date, employeeId));
+      // Архив может оставить прошлую многодневную смену. Показываем факт
+      // доставки, но бот больше не отправляет новые инструкции её владельцу.
+      if (owner?.isActive === false && sentAt == null) return [];
       seen.add(key);
 
       const items = activeChecklistItems(db, checklistId);
       const itemIds = new Set(items.map((item) => item.id));
       const done = marks.filter((m) => m.employeeId === employeeId && itemIds.has(m.itemId)).length;
       const list = getChecklist(db, checklistId);
-      const owner = getEmployeeById(db, employeeId);
-      // Многодневная запись — один ряд `shifts` на весь диапазон, и «ушло»
-      // спрашивается за КОНКРЕТНЫЙ запрошенный день, а не за весь диапазон разом.
-      const sentAt = reminderSentAt(db, shift.id, checklistKind(checklistId, checklistDayKey(shift, date)));
       return [{
         employeeId,
         displayName: owner?.displayName ?? `работник #${employeeId}`,
@@ -263,7 +270,7 @@ export function createChecklistRoutes(db: Db, config: Config) {
           sends: checklistHasContent({
             items,
             note: list?.note,
-            hasDoc: Boolean(list?.docUrl || list?.docFileId || list?.docPath),
+            hasDoc: Boolean(checklistDocumentUrl(list?.docUrl ?? null) || list?.docFileId || list?.docPath),
           }),
           alreadySent: sentAt != null,
           hasTelegram: owner?.telegramUserId != null,
@@ -296,7 +303,7 @@ export function createChecklistRoutes(db: Db, config: Config) {
         id: list.id,
         name: list.name,
         note: list.note,
-        docUrl: list.docUrl,
+        docUrl: checklistDocumentUrl(list.docUrl),
         // Имя файла, а не сам файл: документ приходит в чат от бота, и экран
         // должен сказать, где его искать, а не притворяться, что покажет сам.
         docName: list.docName,

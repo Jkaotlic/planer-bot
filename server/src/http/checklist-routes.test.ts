@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { createApp } from "./app";
 import { makeTestDb } from "../db/testdb";
-import { createEmployee, linkTelegramAccount, setRemindersEnabled } from "../repo/employees";
+import { archiveEmployee, createEmployee, linkTelegramAccount, setRemindersEnabled } from "../repo/employees";
 import { createShift } from "../repo/shifts";
 import { listActiveTemplates } from "../repo/templates";
 import { createChecklistItem, listMarksFor, updateChecklistItem } from "../repo/checklist";
@@ -359,8 +359,8 @@ describe("чек-лист: свой (работник)", () => {
   });
 
   it("отправленное сегодня помечено отправленным и называет час", async () => {
-    const { db, app, igorShift, early } = await stage();
-    addReminder(db, igorShift.id, checklistKind(early.id));
+    const { db, app, igor, igorShift, early } = await stage();
+    addReminder(db, igorShift.id, checklistKind(early.id, TODAY, igor.id));
     // 2026-08-28 07:02 по Москве — час, в который тик и шлёт утренним дежурным.
     db.update(reminderLog).set({ sentAt: new Date(1787889727 * 1000) }).where(eq(reminderLog.shiftId, igorShift.id)).run();
     const admin = await tokenFor(app, 111);
@@ -386,7 +386,7 @@ describe("чек-лист: свой (работник)", () => {
       employeeId: igor.id, category: "duty", templateId: earlyPreset.id,
     });
     // Ушло только за 24-е — своим, дневным ключом.
-    addReminder(db, shift.id, checklistKind(early.id, "2026-08-24"));
+    addReminder(db, shift.id, checklistKind(early.id, "2026-08-24", igor.id));
     const app = createApp({ db, config });
     const admin = await tokenFor(app, 111);
 
@@ -395,6 +395,12 @@ describe("чек-лист: свой (работник)", () => {
 
     const day2 = await (await app.request(`/api/admin/checklist/day?date=2026-08-25`, bearer(admin))).json();
     expect(day2.people.find((p: { displayName: string }) => p.displayName === "Игорь").delivery).toBe("scheduled");
+
+    archiveEmployee(db, igor.id, "2026-08-25");
+    const history = await (await app.request(`/api/admin/checklist/day?date=2026-08-24`, bearer(admin))).json();
+    expect(history.people).toMatchObject([{ employeeId: igor.id, delivery: "sent" }]);
+    const afterArchive = await (await app.request(`/api/admin/checklist/day?date=2026-08-25`, bearer(admin))).json();
+    expect(afterArchive.people).toEqual([]);
   });
 
   it("у неотправленного часа нет", async () => {

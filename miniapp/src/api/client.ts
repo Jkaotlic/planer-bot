@@ -1241,23 +1241,39 @@ async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<R
   }
 }
 
-async function requestToken(): Promise<string> {
+// Срок относится и к чтению тела: fetch завершается сразу после заголовков,
+// а релей может перестать передавать данные уже после них.
+async function withOpeningDeadline<T>(run: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20_000);
+  try {
+    return await run(controller.signal);
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error(OFFLINE_MESSAGE);
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function requestToken(): Promise<string> {
   // Пропуск берётся `readInitData`, а не напрямую у SDK: на клиентах старше
   // Bot API 7.10 строгий разбор SDK падает целиком и не отдаёт ничего — см.
   // `init-data.ts`. Сервер проверяет подпись сам и в тех же полях не нуждается.
   // Пустая строка всё равно отправляется: сервер запишет отказ в лог вместе с
   // устройством, и станет видно, что человек упирается в мёртвую кнопку.
   const initData = readInitData();
-  const res = await apiFetch(`${API_BASE}/api/auth`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ initData }),
+  return withOpeningDeadline(async (signal) => {
+    const res = await apiFetch(`${API_BASE}/api/auth`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ initData }),
+      signal,
+    });
+    if (!res.ok) throw new Error(refusalText(res.status, initData.length > 0));
+    const body = (await res.json()) as { token: string };
+    return body.token;
   });
-  if (!res.ok) {
-    throw new Error(refusalText(res.status, initData.length > 0));
-  }
-  const body = (await res.json()) as { token: string };
-  return body.token;
 }
 
 /**
@@ -1338,8 +1354,8 @@ function withEmployeeNames(schedule: TeamScheduleResponse): TeamSchedule {
   };
 }
 
-async function authorizedGet<T>(path: string): Promise<T> {
-  const res = await authorizedFetch(path);
+async function authorizedGet<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await authorizedFetch(path, init);
   if (!res.ok) throw new Error(await errorMessage(res));
   return (await res.json()) as T;
 }
@@ -1404,7 +1420,7 @@ async function fetchSwaps(): Promise<SwapRequest[]> {
 
 export const realClient: ApiClient = {
   async getBootstrap(from, to) {
-    const raw = await authorizedGet<{
+    const raw = await withOpeningDeadline((signal) => authorizedGet<{
       me: Me;
       myShifts: MyShifts;
       teamSchedule: TeamSchedule;
@@ -1412,7 +1428,7 @@ export const realClient: ApiClient = {
       swaps: { swaps: SwapRequest[] };
       weekendSlots: { slots: WeekendSlotView[] };
       weekendOffers: { offers: WeekendOffer[] };
-    }>(`/api/bootstrap?from=${from}&to=${to}`);
+    }>(`/api/bootstrap?from=${from}&to=${to}`, { signal }));
     // Части приходят в тех же обёртках, что у одиночных ручек, — распаковка
     // здесь, чтобы экраны видели ровно те же формы, что и раньше.
     return {

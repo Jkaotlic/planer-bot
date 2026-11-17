@@ -81,6 +81,17 @@ export function listApprovalMessages(db: Db, shiftId: number): { chatId: number;
     .all();
 }
 
+export function hasApprovalMessage(db: Db, shiftId: number, chatId: number, messageId: number): boolean {
+  return db.select({ messageId: sickLeaveApprovalMessages.messageId })
+    .from(sickLeaveApprovalMessages)
+    .where(and(
+      eq(sickLeaveApprovalMessages.shiftId, shiftId),
+      eq(sickLeaveApprovalMessages.chatId, chatId),
+      eq(sickLeaveApprovalMessages.messageId, messageId),
+    ))
+    .get() != null;
+}
+
 export function deleteApprovalMessages(db: Db, shiftId: number): void {
   db.delete(sickLeaveApprovalMessages).where(eq(sickLeaveApprovalMessages.shiftId, shiftId)).run();
 }

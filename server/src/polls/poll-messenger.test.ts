@@ -1,12 +1,22 @@
+import type { Bot } from "grammy";
 import { describe, it, expect } from "vitest";
 import { makeTestDb } from "../db/testdb";
 import { archiveEmployee, createEmployee, linkTelegramAccount, restoreEmployee } from "../repo/employees";
 import { recordApi, silentBot } from "../bot/testbot";
 import type { Db } from "../db/client";
 import { cancelPoll, castVote, closePoll, createPoll, getPoll, pollRecipientRows } from "./poll-service";
-import { finishPollMessages, redrawPollMessage, remindSilent, sendPollInvites } from "./poll-messenger";
+import { queuePollCloseMessages, redrawPollMessage, remindSilent, sendPollInvites } from "./poll-messenger";
+
+import { deliverFoodCloseMessages } from "../food/food-close-delivery";
 
 const now = { date: "2026-09-29", time: "12:00" };
+
+async function finishPollMessages(
+  bot: Bot, db: Db, poll: Parameters<typeof queuePollCloseMessages>[1], reason: "closed" | "cancelled",
+): Promise<void> {
+  queuePollCloseMessages(db, poll, reason);
+  await deliverFoodCloseMessages(db, bot, `poll:${poll.id}`);
+}
 
 function person(db: Db, name: string, tg: number) {
   const e = createEmployee(db, { displayName: name, inviteToken: `inv-${name}` });

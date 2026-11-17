@@ -31,9 +31,32 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 describe("переавторизация", () => {
+  it.each(["входа", "стартового чтения"] as const)("обрывает зависшее тело ответа %s", async (step) => {
+    vi.useFakeTimers();
+    let hangingCalls = 0;
+    const waitForAbort = (signal?: AbortSignal | null) => new Promise<never>((_resolve, reject) => {
+      signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+    });
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const auth = String(input).endsWith("/api/auth");
+      if (auth && step === "стартового чтения") return jsonResponse({ token: "t" });
+      hangingCalls += 1;
+      const res = jsonResponse({});
+      vi.spyOn(res, "json").mockImplementation(() => waitForAbort(init?.signal));
+      return res;
+    });
+    const { realClient, OFFLINE_MESSAGE } = await import("./client");
+    const rejected = vi.fn();
+    void realClient.getBootstrap("2026-11-16", "2026-11-22").catch(rejected);
+    await vi.advanceTimersByTimeAsync(30000);
+    expect(hangingCalls).toBe(1);
+    expect(rejected).toHaveBeenCalledWith(new Error(OFFLINE_MESSAGE));
+  });
+
   it("протухший токен обновляется сам, а не показывается человеку", async () => {
     const calls: string[] = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {

@@ -4,7 +4,7 @@ import { makeTestDb } from "../db/testdb";
 import { createEmployee, getEmployeeById, archiveEmployee } from "../repo/employees";
 import { createShift, getShift, listShiftsInRange } from "../repo/shifts";
 import { createVacantSlot, getAssignment, listAssignmentsForSlot } from "../repo/weekend";
-import { expressInterest, assignSlot, unassign, confirmOffer } from "./weekend-service";
+import { expressInterest, assignSlot, unassign, declineOffer } from "./weekend-service";
 import type { Db } from "../db/client";
 
 /**
@@ -60,24 +60,20 @@ describe("weekend assignment writes are all-or-nothing", () => {
     expect(getAssignment(db, assigned.assignment.id)).toBeDefined();
   });
 
-  it("confirmOffer writes no orphan entry when the confirmation can't be recorded", () => {
+  it("declineOffer keeps the entry when the refusal can't be recorded", () => {
     const db = makeTestDb();
     const { worker, slot } = slotWithVolunteer(db);
     const assigned = assignSlot(db, slot.id, worker.id, TODAY);
     if (!assigned.ok) throw new Error("setup");
-    // The link to the schedule entry went missing — an admin deleted it directly.
-    // confirmOffer then re-creates the entry and marks the offer confirmed.
-    db.run(sql.raw(`UPDATE weekend_assignments SET shift_id = NULL`));
-    db.run(sql.raw(`DELETE FROM shifts`));
-    raiseOn(db, "no_confirm", "UPDATE", "weekend_assignments");
+    // deleteShift clears shift_id before the service writes the refusal. Fail
+    // only the refusal so both the deletion and the link must roll back.
+    db.run(sql.raw(`CREATE TRIGGER no_decline BEFORE UPDATE OF status ON weekend_assignments
+      WHEN NEW.status = 'declined' BEGIN SELECT RAISE(ABORT, 'boom'); END;`));
 
-    expect(() => confirmOffer(db, assigned.assignment.id, worker.id, TODAY)).toThrow();
+    expect(() => declineOffer(db, assigned.assignment.id, worker.id, TODAY)).toThrow();
 
-    // Otherwise: a fresh weekend_work entry exists, the offer is still `offered`
-    // with shift_id NULL — and the next «Назначить» writes a *second* entry
-    // for the same day.
-    expect(listShiftsInRange(db, SLOT.date, SLOT.date)).toHaveLength(0);
-    expect(getAssignment(db, assigned.assignment.id)?.status).toBe("offered");
+    expect(getShift(db, assigned.assignment.shiftId!)).toBeDefined();
+    expect(getAssignment(db, assigned.assignment.id)).toMatchObject({ status: "offered", shiftId: assigned.assignment.shiftId });
   });
 });
 

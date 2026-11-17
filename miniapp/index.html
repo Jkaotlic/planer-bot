@@ -4,6 +4,15 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
     <title>Смены</title>
+    <style>
+      .boot-screen {
+        font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        padding: calc(24px + env(safe-area-inset-top, 0px)) 20px 24px;
+        max-width: 520px;
+        margin: 0 auto;
+      }
+      #root:not(:empty) ~ .boot-screen { display: none; }
+    </style>
     <!--
       Спасательный круг загрузки. Живёт прямо здесь и только на ES5 — это не
       небрежность, а условие работы.
@@ -29,7 +38,7 @@
       }
 
       (function () {
-        var WAIT_MS = 8000;
+        var WAIT_MS = 25000;
         var reason = "";
 
         function remember(text) {
@@ -37,8 +46,15 @@
         }
 
         window.addEventListener("error", function (event) {
-          remember(event && event.message ? event.message : "script error");
-        });
+          var target = event && event.target;
+          if (target && (target.tagName === "SCRIPT" || target.rel === "modulepreload")) {
+            remember("Не загрузился файл приложения");
+            if (document.body) rescue();
+            else document.addEventListener("DOMContentLoaded", rescue);
+          } else {
+            remember(event && event.message ? event.message : "Ошибка приложения");
+          }
+        }, true);
         window.addEventListener("unhandledrejection", function (event) {
           remember(event && event.reason ? event.reason : "unhandled rejection");
         });
@@ -57,9 +73,10 @@
             xhr.setRequestHeader("Content-Type", "application/json");
             xhr.send(
               JSON.stringify({
-                reason: reason || "экран остался пустым",
+                reason: reason || "Начальный экран не появился за 25 секунд",
                 userAgent: navigator.userAgent,
-                url: location.href.slice(0, 200)
+                // В параметрах запуска Telegram бывают подписанные данные входа.
+                url: (location.origin + location.pathname).slice(0, 200)
               })
             );
           } catch (ignored) {}
@@ -71,36 +88,41 @@
 
           var box = document.createElement("div");
           box.id = "boot-fallback";
-          box.setAttribute(
-            "style",
-            "font:16px/1.45 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;" +
-              "padding:24px 20px;max-width:520px;margin:0 auto;color:#222;background:#fff"
-          );
+          box.className = "boot-screen";
+          box.setAttribute("role", "alert");
           box.innerHTML =
             '<h1 style="font-size:19px;margin:0 0 12px">Приложение не открылось</h1>' +
-            "<p style=\"margin:0 0 12px\">Чаще всего дело в системе телефона: приложению нужен iOS 14 или новее, либо Android со свежим Chrome. На более старой системе экран остаётся пустым всегда.</p>" +
-            '<p style="margin:0 0 12px">Напиши об этом в чат с ботом — я уже отправил отчёт, но без твоего слова никто его не заметит. График можно посмотреть кнопкой «📅 График» в боте, она работает на любом телефоне.</p>' +
-            '<p style="margin:16px 0 0;font-size:12px;color:#888;word-break:break-word">Что случилось: ' +
-            String(reason || "экран остался пустым").replace(/</g, "&lt;") +
-            "</p>";
-
+            '<p>Проверь связь и попробуй ещё раз. График также доступен кнопкой «📅 График» в чате с ботом.</p>' +
+            '<button type="button" style="font:inherit;min-height:44px;padding:0 14px">Повторить</button>';
+          box.querySelector("button").onclick = function () { location.reload(); };
+          var pending = document.getElementById("boot-pending");
+          if (pending) pending.hidden = true;
           document.body.appendChild(box);
         }
 
-        /* Не по одному таймеру: приложение может подняться и на двенадцатой
-           секунде на плохой связи, и тогда сообщение об ошибке надо убрать. */
-        function watch() {
-          var box = document.getElementById("boot-fallback");
-          if (started() && box && box.parentNode) box.parentNode.removeChild(box);
-        }
-
         window.setTimeout(rescue, WAIT_MS);
-        window.setInterval(watch, 1000);
       })();
     </script>
   </head>
   <body>
     <div id="root"></div>
+    <div id="boot-pending" class="boot-screen" role="status">Открываем смены…</div>
+    <script>
+      /* Статус уже в DOM. Если ждать полной загрузки страницы, Telegram
+         держит свою заглушку до окончания скачивания всех модулей. */
+      (function () {
+        var eventType = "web_app_ready";
+        try {
+          if (window.TelegramWebviewProxy && typeof window.TelegramWebviewProxy.postEvent === "function") {
+            window.TelegramWebviewProxy.postEvent(eventType, "");
+          } else if (window.parent !== window) {
+            window.parent.postMessage(JSON.stringify({ eventType: eventType }), "*");
+          } else if (window.external && typeof window.external.notify === "function") {
+            window.external.notify(JSON.stringify({ eventType: eventType }));
+          }
+        } catch (ignored) {}
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

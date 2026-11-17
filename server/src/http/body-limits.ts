@@ -1,6 +1,6 @@
 import type { MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import { MAX_DOC_BYTES } from "./checklist-doc";
+import { MAX_DOC_BYTES } from "../checklists/document";
 
 /**
  * Пределы тела запроса для `/api/*` — по прочитанным байтам, а не по заголовку.

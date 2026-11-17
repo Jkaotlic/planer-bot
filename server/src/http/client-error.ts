@@ -25,7 +25,8 @@ export interface ClientErrorReport {
 
 function field(value: unknown, max: number): string {
   if (typeof value !== "string" || value.length === 0) return "—";
-  return value.length > max ? `${value.slice(0, max)}…` : value;
+  const clipped = value.length > max ? `${value.slice(0, max)}…` : value;
+  return clipped.replace(/[\p{Cc}\p{Zl}\p{Zp}]+/gu, " ");
 }
 
 /**
@@ -37,9 +38,12 @@ function field(value: unknown, max: number): string {
  */
 export function describeClientError(report: ClientErrorReport): string {
   const source: ClientErrorReport = report && typeof report === "object" ? report : {};
+  // Старый клиент отправлял полный адрес. Фрагмент содержал подписанные
+  // данные запуска Telegram, поэтому отбрасываем его и на стороне сервера.
+  const path = typeof source.url === "string" ? source.url.split(/[?#]/, 1)[0] : undefined;
   return [
     `мини-апп не запустился: ${field(source.reason, 400)}`,
     `устройство: ${field(source.userAgent, 300)}`,
-    `адрес: ${field(source.url, 200)}`,
+    `адрес: ${field(path, 200)}`,
   ].join(" | ");
 }

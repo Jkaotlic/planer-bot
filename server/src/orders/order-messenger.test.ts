@@ -1,3 +1,4 @@
+import type { Bot } from "grammy";
 import { describe, it, expect } from "vitest";
 import { makeTestDb } from "../db/testdb";
 import { archiveEmployee, createEmployee, linkTelegramAccount, restoreEmployee } from "../repo/employees";
@@ -6,10 +7,19 @@ import type { Db } from "../db/client";
 import { archivePlace, createPlace } from "./place-service";
 import { addCustomItem, addMenuItem, closeOrder, createOrder, declineOrder, getOrder } from "./order-service";
 import { formatMoney } from "@planer/shared";
-import { finishOrderMessages, orderMenu, redrawOrderMessage, remindUnpaid, sendOrderInvites } from "./order-messenger";
+import { queueOrderCloseMessages, orderMenu, redrawOrderMessage, remindUnpaid, sendOrderInvites } from "./order-messenger";
+
+import { deliverFoodCloseMessages } from "../food/food-close-delivery";
 
 const now = { date: "2026-09-29", time: "12:00" };
 const URL = "https://example.com";
+
+async function finishOrderMessages(
+  bot: Bot, db: Db, order: Parameters<typeof queueOrderCloseMessages>[1], reason: "closed" | "cancelled",
+): Promise<void> {
+  queueOrderCloseMessages(db, order, reason);
+  await deliverFoodCloseMessages(db, bot, `order:${order.id}`);
+}
 
 function person(db: Db, name: string, tg: number) {
   const e = createEmployee(db, { displayName: name, inviteToken: `inv-${name}` });
@@ -64,7 +74,7 @@ describe("рассылка заказа", () => {
     closeOrder(db, order, anya);
     const { bot } = silentBot();
     const api = recordApi(bot);
-    await finishOrderMessages(bot, db, getOrder(db, order.id)!, "closed", URL);
+    await finishOrderMessages(bot, db, getOrder(db, order.id)!, "closed");
     const summary = api.sent.find((m) => m.chat_id === 100)!;
     expect(summary.text).toContain("Икра, 09.10");
     expect(summary.text).toContain("Кто что:");
@@ -72,7 +82,7 @@ describe("рассылка заказа", () => {
     expect(api.sent.find((m) => m.text.startsWith("💸"))!.text).toContain("Икра, 09.10");
     const cancelBot = silentBot().bot;
     const cancelApi = recordApi(cancelBot);
-    await finishOrderMessages(cancelBot, db, { ...order, cancelledAt: new Date() }, "cancelled", URL);
+    await finishOrderMessages(cancelBot, db, { ...order, cancelledAt: new Date() }, "cancelled");
     expect(cancelApi.sent).toHaveLength(2);
     expect(cancelApi.sent.every((m) => m.text === "🚫 Сбор «Икра, 09.10» отменён.")).toBe(true);
     const remindBot = silentBot().bot;
@@ -92,7 +102,7 @@ describe("рассылка заказа", () => {
     closeOrder(db, order, anya);
     const { bot } = silentBot();
     const api = recordApi(bot);
-    await finishOrderMessages(bot, db, getOrder(db, order.id)!, "closed", URL);
+    await finishOrderMessages(bot, db, getOrder(db, order.id)!, "closed");
     const summary = api.sent.filter((m) => m.chat_id === 100);
     expect(summary).toHaveLength(1);
     expect(summary[0]!.text).toContain("Что заказать:");
@@ -107,7 +117,7 @@ describe("рассылка заказа", () => {
     const { db, anya, order } = stage();
     const { bot } = silentBot();
     const api = recordApi(bot);
-    await finishOrderMessages(bot, db, { ...order, cancelledAt: new Date() }, "cancelled", URL);
+    await finishOrderMessages(bot, db, { ...order, cancelledAt: new Date() }, "cancelled");
     // Место стоит МЕЖДУ «Заказ» и «отменён» («Заказ из «Шаурмечная» отменён») —
     // поэтому смотрим не на слитную фразу, а на форму «Заказ … отменён» (то же,
     // что в решении ревью для HTTP-теста).
@@ -143,7 +153,7 @@ describe("архивный адресат заказа", () => {
   it("при закрытии архивному ни гашения, ни «сдай»; в сводке запускающему он с долгом", async () => {
     const { db, anya, order, bot, api } = await stageArchived();
     closeOrder(db, order, anya);
-    await finishOrderMessages(bot, db, getOrder(db, order.id)!, "closed", URL);
+    await finishOrderMessages(bot, db, getOrder(db, order.id)!, "closed");
     expect(api.calls.filter((c) => c.payload?.chat_id === 101)).toEqual([]);
     const summary = api.sent.filter((m) => m.chat_id === 100).map((m) => m.text).join("\n");
     expect(summary).toContain(`Игорь — ${formatMoney(350)}`);
@@ -151,7 +161,7 @@ describe("архивный адресат заказа", () => {
 
   it("отмена не уходит архивному", async () => {
     const { db, anya, order, bot, api } = await stageArchived();
-    await finishOrderMessages(bot, db, { ...order, cancelledAt: new Date() }, "cancelled", URL);
+    await finishOrderMessages(bot, db, { ...order, cancelledAt: new Date() }, "cancelled");
     expect(api.calls.filter((c) => c.payload?.chat_id === 101)).toEqual([]);
     expect(api.sent.map((m) => m.chat_id).sort()).toEqual([100, 102]);
     void anya;
@@ -169,7 +179,7 @@ describe("архивный адресат заказа", () => {
     const { db, anya, igor, order, bot, api } = await stageArchived();
     restoreEmployee(db, igor.id);
     closeOrder(db, order, anya);
-    await finishOrderMessages(bot, db, getOrder(db, order.id)!, "closed", URL);
+    await finishOrderMessages(bot, db, getOrder(db, order.id)!, "closed");
     expect(api.sent.filter((m) => m.text.startsWith("💸")).map((m) => m.chat_id)).toEqual([101]);
   });
 });
@@ -185,7 +195,7 @@ describe("длинная сводка запускающему", () => {
     closeOrder(db, order, anya);
     const { bot } = silentBot();
     const api = recordApi(bot);
-    await finishOrderMessages(bot, db, getOrder(db, order.id)!, "closed", URL);
+    await finishOrderMessages(bot, db, getOrder(db, order.id)!, "closed");
     const summary = api.sent.filter((m) => m.chat_id === 100);
     expect(summary.length).toBeGreaterThan(1);
     for (const m of summary) expect(m.text.length).toBeLessThanOrEqual(4000);

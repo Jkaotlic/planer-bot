@@ -9,6 +9,7 @@ import {
   addApprovalMessage,
   claimPendingSickLeave,
   deleteApprovalMessages,
+  hasApprovalMessage,
   listApprovalMessages,
   listPendingSickLeaves,
   listSickLeavesPendingSince,
@@ -80,14 +81,9 @@ export function approvalTextFor(db: Db, sick: Shift): string {
   return sickApprovalText(owner?.displayName ?? "Работник", sick, dayLines(db, sick), owner?.isObserver ?? false, extensionOf(sick));
 }
 
-/**
- * Requests whose send loop is still running, and the outcome of any decision taken meanwhile.
- * The loop's closing step must say what REALLY happened to the letters it sent late; the row
- * cannot tell (an extension's ❌ and a withdraw both leave a present, non-pending, approver-less
- * row). Only in-flight ids are recorded, so nothing accumulates.
- */
-const inFlight = new Set<number>();
-const outcomes = new Map<number, string>();
+/** Keep the decision on each active send, since a newer request can use the same entry ID. */
+type ApprovalDelivery = { entryId: number; outcome?: string };
+const activeDeliveries = new WeakMap<Db, Set<ApprovalDelivery>>();
 
 /**
  * What the last decision on an entry was, for a second press moments later. The row cannot say:
@@ -112,8 +108,21 @@ function rememberDecision(deps: { db: Db; now?: () => number }, entryId: number,
   recent.set(entryId, { text, at: now });
 }
 
-function rememberOutcome(entryId: number, outcome: string): void {
-  if (inFlight.has(entryId)) outcomes.set(entryId, outcome);
+function rememberOutcome(db: Db, entryId: number, outcome: string): void {
+  for (const delivery of activeDeliveries.get(db) ?? []) {
+    if (delivery.entryId === entryId) delivery.outcome ??= outcome;
+  }
+}
+
+type ApprovalMessage = { chatId: number; messageId: number; sentAt: number };
+
+/** Closed requests retain their normal decision reply. Pending ones require the actual letter. */
+export function isCurrentApprovalMessage(db: Db, entryId: number, message: ApprovalMessage | null): boolean {
+  const requestedAt = getShift(db, entryId)?.approvalRequestedAt;
+  if (requestedAt == null) return true;
+  return message != null
+    && message.sentAt * 1000 >= requestedAt.getTime()
+    && hasApprovalMessage(db, entryId, message.chatId, message.messageId);
 }
 
 /**
@@ -123,43 +132,56 @@ function rememberOutcome(entryId: number, outcome: string): void {
  * `notifyAdminsAlways` it ignores notice mutes — the hand-over hangs on this letter.
  */
 export async function requestApproval(deps: SickApprovalDeps, sick: Shift, approved: SickSpan | null = null): Promise<Shift> {
+  const marked = requestApprovalDb(deps, sick, approved);
+  if (!marked) return sick;
+  await sendApprovalRequest(deps, marked);
+  return marked;
+}
+
+export function requestApprovalDb(deps: SickApprovalDeps, sick: Shift, approved: SickSpan | null): Shift | undefined {
   // A new round is a new question: the previous round's outcome must not answer it.
   recentOf(deps.db).delete(sick.id);
   const marked = markApprovalRequested(deps.db, sick.id, new Date((deps.now ?? Date.now)()), approved);
-  // Gone, or not a sick leave any more: nothing to ask about, and a letter with
-  // buttons for a row that does not exist could only produce «Больничного уже нет».
-  if (!marked) return sick;
-  if (!deps.bot) return marked;
-  const text = approvalTextFor(deps.db, marked);
-  inFlight.add(marked.id);
-  outcomes.delete(marked.id);
-  // Letters sent after the row was already gone (the worker deleted it mid-loop): the
-  // message-id table cannot hold them (FOREIGN KEY), so they are closed from this list.
+  // Clean up tracking from older deployments that retained already closed letters.
+  if (marked) takeApprovalMessages(deps.db, sick.id, "Эта заявка уже закрыта");
+  return marked;
+}
+
+export async function sendApprovalRequest(deps: SickApprovalDeps, requested: Shift): Promise<void> {
+  if (!deps.bot) return;
+  const marked = getShift(deps.db, requested.id);
+  // The worker can edit while a cancellation is being sent. Use the current
+  // version of this request and skip it if it was already resolved.
+  if (marked?.approvalRequestedAt == null || marked.approvalRequestedAt.getTime() !== requested.approvalRequestedAt?.getTime()) return;
+  await deliverApprovalMessages(deps.db, deps.bot, marked, approvalTextFor(deps.db, marked), true);
+}
+
+async function deliverApprovalMessages(db: Db, bot: Bot, request: Shift, text: string, includeOutcome: boolean): Promise<number> {
+  const delivery: ApprovalDelivery = { entryId: request.id };
+  const active = activeDeliveries.get(db) ?? new Set<ApprovalDelivery>();
+  activeDeliveries.set(db, active);
+  active.add(delivery);
+  let delivered = 0;
+  // A late message is closed directly. Taking all tracked letters here would
+  // also take letters that belong to a newer round on the same sick leave.
   const late: { chatId: number; messageId: number }[] = [];
   try {
-    for (const admin of listAdmins(deps.db)) {
-      if (admin.telegramUserId == null || admin.id === marked.employeeId) continue;
-      const messageId = await sendTracked(deps.bot, admin.telegramUserId, text, sickApprovalKeyboard(marked.id));
+    for (const admin of listAdmins(db)) {
+      if (admin.telegramUserId == null || admin.id === request.employeeId) continue;
+      const messageId = await sendTracked(bot, admin.telegramUserId, text, sickApprovalKeyboard(request.id));
       if (messageId == null) continue;
-      if (getShift(deps.db, marked.id)) addApprovalMessage(deps.db, marked.id, admin.telegramUserId, messageId);
+      delivered++;
+      if (!delivery.outcome && getShift(db, request.id)?.approvalRequestedAt?.getTime() === request.approvalRequestedAt?.getTime()) {
+        addApprovalMessage(db, request.id, admin.telegramUserId, messageId);
+      }
       else late.push({ chatId: admin.telegramUserId, messageId });
     }
   } finally {
-    inFlight.delete(marked.id);
+    active.delete(delivery);
   }
-  const decided = outcomes.get(marked.id);
-  outcomes.delete(marked.id);
-  // An admin may have decided while the loop was still sending: that decision
-  // edited only the letters recorded by then, so the ones recorded after it still
-  // carry live buttons. Close them with the outcome that did happen.
-  const now = getShift(deps.db, marked.id);
-  if (decided != null || !now || now.approvalRequestedAt == null) {
-    // The recorded outcome, never one inferred from the row; unknown → neutral words.
-    const finalText = `${text}\n\n${decided ?? "Решение уже принято"}`;
-    await editApprovalMessages(deps, late, finalText);
-    await finishApprovalMessages(deps, marked.id, finalText);
-  }
-  return marked;
+  const outcome = includeOutcome ? delivery.outcome : null;
+  await editApprovalMessages({ bot }, late, `${text}\n\n${outcome ?? "Решение уже принято"}`);
+  return delivered;
 }
 
 /** The worker moved the dates of a still-pending sick leave: same letter, new dates, buttons kept. */
@@ -188,22 +210,35 @@ export async function redrawApprovalMessages(deps: SickApprovalDeps, sick: Shift
  *   never gives back a day that was dropped, and the letters are redrawn in place — a second
  *   letter about the same request would be noise, and its buttons would decide twice.
  */
-export async function reconcilePendingDateEdit(deps: SickApprovalDeps, existing: Shift, updated: Shift): Promise<"withdrawn" | "redrawn"> {
+export type PendingDateEdit =
+  | { kind: "withdrawn"; letter: ClosedRequest | null }
+  | { kind: "redraw"; entryId: number };
+
+export function reconcilePendingDateEditDb(db: Db, existing: Shift, updated: Shift): PendingDateEdit {
   const covered = eachDayIso(updated.date, updated.endDate ?? updated.date);
   const approvedDays =
     existing.approvedDate == null ? null : new Set(eachDayIso(existing.approvedDate, existing.approvedEndDate ?? existing.approvedDate));
   if (approvedDays && covered.every((date) => approvedDays.has(date))) {
-    await withdrawExtension(deps, updated);
-    return "withdrawn";
+    return { kind: "withdrawn", letter: withdrawExtensionDb(db, updated) };
   }
   // Empty intersection (or a plain request): no snapshot, so a reject deletes as for any plain request.
   const kept =
     existing.approvedDate == null
       ? null
       : sickSpanIntersection({ date: existing.approvedDate, endDate: existing.approvedEndDate }, updated);
-  const fresh = existing.approvedDate == null ? updated : (setApprovedSpan(deps.db, updated.id, kept) ?? updated);
-  await redrawApprovalMessages(deps, fresh);
-  return "redrawn";
+  if (existing.approvedDate != null) setApprovedSpan(db, updated.id, kept);
+  return { kind: "redraw", entryId: updated.id };
+}
+
+export async function announcePendingDateEdit(deps: SickApprovalDeps, edit: PendingDateEdit): Promise<void> {
+  if (edit.kind === "withdrawn") {
+    if (edit.letter) await editClosedRequest(deps, edit.letter);
+    return;
+  }
+  // A Telegram send may have delayed this notification. Read the current
+  // dates, since an admin may already have decided or the worker edited again.
+  const fresh = getShift(deps.db, edit.entryId);
+  if (fresh?.approvalRequestedAt != null) await redrawApprovalMessages(deps, fresh);
 }
 
 /**
@@ -212,12 +247,19 @@ export async function reconcilePendingDateEdit(deps: SickApprovalDeps, existing:
  * stays approved, as it was before the extension.
  */
 export async function withdrawExtension(deps: SickApprovalDeps, sick: Shift): Promise<void> {
+  const letter = withdrawExtensionDb(deps.db, sick, deps.now);
+  if (letter) await editClosedRequest(deps, letter);
+}
+
+function withdrawExtensionDb(db: Db, sick: Shift, now?: () => number): ClosedRequest | null {
   // Approver kept: the row goes back to what it was before the extension, and that was approved by someone.
-  const cleared = claimPendingSickLeave(deps.db, sick.id);
-  if (!cleared) return;
-  rememberDecision(deps, sick.id, "Продление уже снято");
-  const name = cleared.employeeId == null ? undefined : getEmployeeById(deps.db, cleared.employeeId)?.displayName;
-  await finishApprovalMessages(deps, sick.id, `${sickExtensionWithdrawnText(name ?? "Работник", cleared)}\n\n↩️ Продление снято — ОК не нужен`);
+  const cleared = claimPendingSickLeave(db, sick.id);
+  if (!cleared) return null;
+  rememberDecision({ db, now }, sick.id, "Продление уже снято");
+  const name = cleared.employeeId == null ? undefined : getEmployeeById(db, cleared.employeeId)?.displayName;
+  const finalLine = "↩️ Продление снято — ОК не нужен";
+  const messages = takeApprovalMessages(db, sick.id, finalLine);
+  return { messages, text: `${sickExtensionWithdrawnText(name ?? "Работник", cleared)}\n\n${finalLine}` };
 }
 
 /**
@@ -226,11 +268,17 @@ export async function withdrawExtension(deps: SickApprovalDeps, sick: Shift): Pr
  * Cosmetic: an edit failing (message deleted by hand) must not undo the decision.
  */
 export async function finishApprovalMessages(deps: SickApprovalDeps, entryId: number, finalText: string): Promise<void> {
-  const rows = listApprovalMessages(deps.db, entryId);
-  deleteApprovalMessages(deps.db, entryId);
   // The outcome is the last paragraph by convention of every caller.
-  rememberOutcome(entryId, finalText.split("\n\n").at(-1) ?? finalText);
+  const rows = takeApprovalMessages(deps.db, entryId, finalText.split("\n\n").at(-1) ?? finalText);
   await editApprovalMessages(deps, rows, finalText);
+}
+
+function takeApprovalMessages(db: Db, entryId: number, finalLine: string): ClosedRequest["messages"] {
+  const messages = listApprovalMessages(db, entryId);
+  deleteApprovalMessages(db, entryId);
+  // A send loop still running for this request closes its late letters with this outcome.
+  rememberOutcome(db, entryId, finalLine);
+  return messages;
 }
 
 /** The letters of a request that was taken out of «pending» for a delete: what to edit, and to what. */
@@ -250,10 +298,7 @@ export interface ClosedRequest {
  */
 export function takeRequestOutOfPending(db: Db, existing: Shift, finalLine: string): ClosedRequest | null {
   if (!claimPendingSickLeave(db, existing.id)) return null;
-  const messages = listApprovalMessages(db, existing.id);
-  deleteApprovalMessages(db, existing.id);
-  // A send loop still running for this request closes its late letters with this outcome.
-  rememberOutcome(existing.id, finalLine);
+  const messages = takeApprovalMessages(db, existing.id, finalLine);
   return { messages, text: `${approvalTextFor(db, existing)}\n\n${finalLine}` };
 }
 
@@ -316,6 +361,7 @@ export async function approveSickLeave(
   const adminName = nameOf(db, adminId) ?? "Админ";
   const extension = extensionOf(before);
   recordAudit(db, "sick_leave_approved", adminId, entryAuditPayload(db, claimed));
+  const messages = takeApprovalMessages(db, entryId, `✅ Подтвердил(а) ${adminName}`);
 
   const owner = claimed.employeeId == null ? undefined : getEmployeeById(db, claimed.employeeId);
   // The hand-overs come FIRST, before any Telegram await: every draft row is created right here,
@@ -339,7 +385,7 @@ export async function approveSickLeave(
   }
   await tellDecided(onDecided);
   const made = started ? await started : [];
-  await finishApprovalMessages(deps, entryId, `${approvalTextFor(db, before)}\n\n✅ Подтвердил(а) ${adminName}`);
+  await editApprovalMessages(deps, messages, `${approvalTextFor(db, before)}\n\n✅ Подтвердил(а) ${adminName}`);
 
   // The worker may have deleted the row while the letters were being edited. Her
   // hand-overs were cancelled with it, and «✅ подтвердил(а)» about a sick leave she just
@@ -394,7 +440,7 @@ export async function rejectSickLeave(
   // would be told «уже подтверждён», which is false. So: snapshot, cancel, delete — then talk.
   const payload = entryAuditPayload(db, claimed);
   const letter = approvalTextFor(db, before);
-  const messages = listApprovalMessages(db, entryId);
+  const messages = takeApprovalMessages(db, entryId, `❌ Отклонил(а) ${adminName}`);
   let cancelled;
   if (before.approvedDate != null) {
     // A rejected EXTENSION gives the row back as it was approved: the old days live on
@@ -411,7 +457,6 @@ export async function rejectSickLeave(
     deleteShift(db, entryId);
   }
   recordAudit(db, "sick_leave_rejected", adminId, payload);
-  rememberOutcome(entryId, `❌ Отклонил(а) ${adminName}`);
 
   await tellDecided(onDecided);
   await editApprovalMessages(deps, messages, `${letter}\n\n❌ Отклонил(а) ${adminName}`);
@@ -492,22 +537,7 @@ export async function runSickApprovalReminderTick(db: Db, bot: Bot, at: Date = n
       const kind = remindKind(requestedAt);
       if (hasReminder(db, sick.id, kind)) continue;
       const text = reminderText(db, sick, Math.floor((at.getTime() - requestedAt.getTime()) / (60 * 60 * 1000)));
-      let delivered = 0;
-      // Letters that went out after a decision had already closed the request: that decision
-      // edited only the letters recorded by then, so these are closed here (cf. `requestApproval`).
-      const late: { chatId: number; messageId: number }[] = [];
-      for (const admin of listAdmins(db)) {
-        if (admin.telegramUserId == null || admin.id === sick.employeeId) continue;
-        const messageId = await sendTracked(bot, admin.telegramUserId, text, sickApprovalKeyboard(sick.id));
-        if (messageId == null) continue;
-        delivered++;
-        // Synchronous check-and-record: a decision clears the rows before it edits them, so a
-        // letter recorded while the request is still pending is always reached by that decision.
-        if (getShift(db, sick.id)?.approvalRequestedAt != null) addApprovalMessage(db, sick.id, admin.telegramUserId, messageId);
-        else late.push({ chatId: admin.telegramUserId, messageId });
-      }
-      // The outcome itself is not known here (a reject deletes the row): neutral words, as in `requestApproval`.
-      await editApprovalMessages({ bot }, late, `${text}\n\nРешение уже принято`);
+      const delivered = await deliverApprovalMessages(db, bot, sick, text, false);
       if (delivered === 0) continue;
       // The row may be gone (rejected mid-loop): `reminder_log` references it, and there is nothing left to mark.
       if (getShift(db, sick.id)) addReminder(db, sick.id, kind);

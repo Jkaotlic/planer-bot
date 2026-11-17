@@ -39,10 +39,12 @@ export function QrScreen({ initialStyle, onClose, onSaved }: {
   // Состояние `sending` обновляется после рендера, а второе касание приходит раньше:
   // без флага в ref быстрый двойной тап отправил бы картинку в личку дважды.
   const inFlight = useRef(false);
+  const editVersion = useRef(0);
 
   // Итог отправки относится к тому коду, что был на экране в тот момент: после любой
   // правки «Отправил…» стояло бы рядом с другой картинкой, а красный отказ — залип.
   function edit(change: () => void) {
+    editVersion.current += 1;
     setStatus(null);
     change();
   }
@@ -70,6 +72,7 @@ export function QrScreen({ initialStyle, onClose, onSaved }: {
 
   async function send() {
     if (inFlight.current) return;
+    const version = editVersion.current;
     inFlight.current = true;
     setSending(true);
     setStatus(null);
@@ -77,9 +80,11 @@ export function QrScreen({ initialStyle, onClose, onSaved }: {
       await apiClient.sendQrToMe(text, full);
       // Сервер запомнил стиль вместе с отправкой — уход второй раз его не шлёт.
       setSaved(style);
-      setStatus({ ok: true, text: "Отправил — картинка в чате с ботом." });
+      if (editVersion.current === version) setStatus({ ok: true, text: "Отправил — картинка в чате с ботом." });
     } catch (err) {
-      setStatus({ ok: false, text: err instanceof Error ? err.message : "Не получилось отправить — попробуй ещё раз." });
+      if (editVersion.current === version) {
+        setStatus({ ok: false, text: err instanceof Error ? err.message : "Не получилось отправить — попробуй ещё раз." });
+      }
     } finally {
       inFlight.current = false;
       setSending(false);

@@ -7,12 +7,11 @@ import { mkdtempSync, rmSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fakeTelegram, initData, BOT_TOKEN, sleep, until } from "./lib.mjs";
-// Без переиспользования соединений: Node закрывает простаивающее через 5 с, и запрос,
-// попавший в этот миг, получает ECONNRESET (замер: 1 из 2400). Сценариям это шум, а
-// повтор мог бы скрыть настоящий обрыв. Сама гонка записана в docs/audit/ledger.md.
+// Обычно сценарии открывают новое соединение на каждый запрос. Пул включаем
+// явно в проверке keep-alive, чтобы она читала заголовок от реального сервера.
 function fetch(url, init = {}) {
   return new Promise((done, fail) => {
-    const req = http.request(url, { method: init.method ?? "GET", headers: init.headers, agent: false }, (res) => {
+    const req = http.request(url, { method: init.method ?? "GET", headers: init.headers, agent: init.agent ?? false }, (res) => {
       const chunks = [];
       res.on("data", (c) => chunks.push(c));
       res.on("end", () => {
@@ -144,7 +143,7 @@ export { msk, ok, login };
 
 export async function apiScenarios() {
   let adm, w1, w2, w1id, w2id, templates, invite;
-  await check("старт: 47 миграций на пустой базе, бот опрашивает, health зелёный", async () => {
+  await check("старт: миграции на пустой базе, бот опрашивает, health зелёный", async () => {
     const h = await until(async () => {
       const r = await j("GET", "/api/health");
       return r.status === 200 && r;
@@ -152,6 +151,19 @@ export async function apiScenarios() {
     assert(h, "health не 200: " + JSON.stringify((await j("GET", "/api/health")).data) + log.slice(-500));
     assert(/bot @e2e_test_bot started/.test(log), "нет строки старта бота");
     return JSON.stringify(h.data);
+  });
+  await check("сервер держит соединение дольше двухминутного пула Caddy", async () => {
+    const agent = new http.Agent({ keepAlive: true });
+    try {
+      const response = await fetch(BASE + "/api/health", { agent });
+      assert(response.status === 200, `health ответил ${response.status}`);
+      const header = response.headers.get("keep-alive") ?? "";
+      const timeout = Number(header.match(/timeout=(\d+)/)?.[1]);
+      assert(timeout > 120, `сервер объявил Keep-Alive: ${header || "нет заголовка"}`);
+      return header;
+    } finally {
+      agent.destroy();
+    }
   });
   await check("статика: /app и /admin отдаются, промах по assets — 404, заголовки безопасности", async () => {
     const a = await j("GET", "/app/", { raw: true });
@@ -371,7 +383,7 @@ export async function apiScenarios() {
     );
     assert(q, "админу не пришла кнопка");
     const cb = JSON.stringify(q.body.reply_markup).match(/sick:approve:\d+/)[0];
-    tg.tap(ADMIN.id, "Аня", cb, { message_id: q.body.message_id ?? 77 });
+    tg.tap(ADMIN.id, "Аня", cb, { message_id: q.messageId, date: q.messageDate });
     const left = await until(async () => {
       const x = await j("GET", "/api/admin/sick-approvals", { token: adm });
       return x.data.approvals.length === 0;

@@ -102,6 +102,25 @@ describe("консоль: экран «QR-код»", () => {
     }
   });
 
+  it("результат копирования прежнего QR не показывается под изменённым кодом", async () => {
+    let finish!: () => void;
+    const write = vi.fn().mockReturnValue(new Promise<void>((resolve) => { finish = resolve; }));
+    vi.stubGlobal("ClipboardItem", class {});
+    Object.defineProperty(navigator, "clipboard", { value: { write }, configurable: true });
+    try {
+      const el = await render();
+      const field = el.querySelector("textarea")!;
+      await type(field, "https://example.com");
+      await act(async () => button(el, "Скопировать картинку").click());
+      await type(field, "https://example.org");
+      await act(async () => finish());
+      expect(el.querySelector('[role="status"]')).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+      delete (navigator as { clipboard?: unknown }).clipboard;
+    }
+  });
+
   it("синхронный сбой рисования — сообщение на экране, а не необработанный отказ", async () => {
     const unhandled = vi.fn();
     process.on("unhandledRejection", unhandled);

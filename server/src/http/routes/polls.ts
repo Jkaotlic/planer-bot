@@ -10,9 +10,11 @@ import { teamNow } from "../../util/team-time";
 import { requireAuth, type Env } from "../middleware";
 import { jsonBody } from "../json-body";
 import {
-  canManage, cancelPoll, castVote, closePoll, createPoll, getPoll, hasRecentSamePoll, listPollsFor, normalizeQuestion, pollRecipientRows, pollView,
+  canManage, castVote, createPoll, getPoll, hasRecentSamePoll, listPollsFor, normalizeQuestion, pollRecipientRows, pollView,
 } from "../../polls/poll-service";
-import { finishPollMessages, redrawPollMessage, remindSilent, sendPollInvites } from "../../polls/poll-messenger";
+import { redrawPollMessage, remindSilent, sendPollInvites } from "../../polls/poll-messenger";
+import { closePollWithMessages } from "../../food/food-close";
+import { deliverFoodCloseMessages } from "../../food/food-close-delivery";
 
 /** Мини-апп показывает текст ошибки как есть — код «not_found» человеку ничего не скажет. */
 const NOT_FOUND = "Опрос не найден.";
@@ -154,11 +156,10 @@ export function createPollRoutes(deps: { db: Db; config: Config; bot?: Bot }): H
       const now = teamNow(config.teamTz);
       const poll = getPoll(db, Number(c.req.param("id")));
       if (!poll || !pollView(db, poll, viewer, now)) return c.json({ error: NOT_FOUND }, 404);
-      const result = action === "close" ? closePoll(db, poll, viewer) : cancelPoll(db, poll, viewer);
+      const result = closePollWithMessages(db, poll, viewer, action === "close" ? "closed" : "cancelled");
       if (!result.ok) return c.json({ error: result.error }, 409);
       const fresh = getPoll(db, poll.id)!;
-      recordAudit(db, action === "close" ? "poll_closed" : "poll_cancelled", viewer.id, { pollId: poll.id, question: poll.question });
-      if (bot) await finishPollMessages(bot, db, fresh, action === "close" ? "closed" : "cancelled");
+      if (bot) await deliverFoodCloseMessages(db, bot, `poll:${poll.id}`);
       return c.json({ poll: pollView(db, fresh, viewer, now) });
     });
   }

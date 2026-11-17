@@ -1,15 +1,17 @@
 import { describe, it, expect, vi } from "vitest";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { GrammyError, type Bot } from "grammy";
 import { makeTestDb } from "../db/testdb";
-import { createEmployee, linkTelegramAccount } from "../repo/employees";
-import { createShift } from "../repo/shifts";
+import { archiveEmployee, createEmployee, linkTelegramAccount } from "../repo/employees";
+import { createShift, getShift, updateShift } from "../repo/shifts";
 import { listActiveTemplates } from "../repo/templates";
 import { createChecklistItem, setMark, updateChecklistItem } from "../repo/checklist";
-import { createChecklist, setChecklistTemplates, updateChecklist } from "../repo/checklists";
+import { createChecklist, getChecklist, setChecklistTemplates, updateChecklist } from "../repo/checklists";
 import { testConfig } from "../test-config";
 import { runChecklistTick } from "./checklist-tick";
 import type { Db } from "../db/client";
-import { reminderLog } from "../db/schema";
 import { createBot } from "../bot/bot";
 import { recordApi, stubBotInfo } from "../bot/testbot";
 import { listMarksFor } from "../repo/checklist";
@@ -44,9 +46,9 @@ function stage(opts: { items?: string[]; remindersEnabled?: boolean; linked?: bo
   const duty = listActiveTemplates(db).find((t) => t.category === "duty")!;
   const list = createChecklist(db, "Обход 47-го");
   if (opts.linkedList !== false) setChecklistTemplates(db, list.id, [duty.id]);
-  createShift(db, { date: TODAY, start: "07:00", end: "16:00", employeeId: igor.id, category: "duty", templateId: duty.id });
+  const shift = createShift(db, { date: TODAY, start: "07:00", end: "16:00", employeeId: igor.id, category: "duty", templateId: duty.id });
   for (const title of opts.items ?? ["Свет", "Окна"]) createChecklistItem(db, list.id, title);
-  return { db, igor, duty, list };
+  return { db, igor, duty, list, shift };
 }
 
 describe("runChecklistTick", () => {
@@ -132,6 +134,51 @@ describe("runChecklistTick", () => {
     expect(sent[0]!.text).toContain("Проверить до обеда");
     expect(sent[0]!.text).toContain("Окна");
   });
+  it("после переназначения смены отправляет новому дежурному и список, и файл", async () => {
+    const { db, list, shift } = stage();
+    const anya = createEmployee(db, { displayName: "Аня", inviteToken: "inv-2" });
+    linkTelegramAccount(db, "inv-2", 444);
+    updateChecklist(db, list.id, { docFileId: "test-file" });
+    const { bot, sent, docs } = fakeBot();
+    expect(await runChecklistTick(db, bot, config, { date: TODAY, time: "07:05" })).toBe(1);
+
+    updateShift(db, shift.id, { employeeId: anya.id });
+    expect(await runChecklistTick(db, bot, config, { date: TODAY, time: "07:10" })).toBe(1);
+    expect(await runChecklistTick(db, bot, config, { date: TODAY, time: "07:15" })).toBe(0);
+    expect(sent.map(({ to }) => to)).toEqual([333, 444]);
+    expect(docs.map(({ to }) => to)).toEqual([333, 444]);
+  });
+
+  it("не шлёт внутреннюю инструкцию архивному сотруднику из старой многодневной записи", async () => {
+    const { db, igor, list, shift } = stage();
+    updateShift(db, shift.id, { date: "2026-08-23", endDate: "2026-08-25" });
+    updateChecklist(db, list.id, { docFileId: "test-file" });
+    archiveEmployee(db, igor.id, TODAY);
+    expect(getShift(db, shift.id)?.employeeId).toBe(igor.id);
+
+    const { bot, sent, docs } = fakeBot();
+    expect(await runChecklistTick(db, bot, config, { date: TODAY, time: "07:05" })).toBe(0);
+    expect(sent).toEqual([]);
+    expect(docs).toEqual([]);
+  });
+
+  it("проверяет назначение после отправки файла, прежде чем слать сам список", async () => {
+    const { db, list, shift } = stage();
+    const anya = createEmployee(db, { displayName: "Аня", inviteToken: "inv-2" });
+    linkTelegramAccount(db, "inv-2", 444);
+    updateChecklist(db, list.id, { docFileId: "test-file" });
+    const { bot, sent } = fakeBot();
+    vi.mocked(bot.api.sendDocument).mockImplementationOnce(async () => {
+      updateShift(db, shift.id, { employeeId: anya.id });
+      return {} as Awaited<ReturnType<typeof bot.api.sendDocument>>;
+    });
+
+    expect(await runChecklistTick(db, bot, config, { date: TODAY, time: "07:05" })).toBe(0);
+    expect(sent).toEqual([]);
+    expect(await runChecklistTick(db, bot, config, { date: TODAY, time: "07:10" })).toBe(1);
+    expect(sent.map(({ to }) => to)).toEqual([444]);
+  });
+
   // Решение владельца от 2026-09-28: дежурному на больничном чек-лист не нужен —
   // он не на этаже, а смена до решения по передаче всё ещё стоит на нём.
   it("дежурный на больничном сегодня — чек-лист не уходит", async () => {
@@ -416,19 +463,15 @@ describe("runChecklistTick", () => {
       expect(sent).toHaveLength(2);
     });
 
-    // Однодневная запись держит прежний вид пометки — без `@дня` — иначе в день
-    // выкатки сегодняшние чек-листы ушли бы второй раз.
-    it("однодневная запись: одна отправка в день, вид пометки без «@»", async () => {
-      const { db } = stage();
-
+    it("перенос однодневной смены на другую дату не переносит пометку доставки", async () => {
+      const { db, shift } = stage();
       const { bot, sent } = fakeBot();
-      await runChecklistTick(db, bot, config, { date: TODAY, time: "07:05" });
-      await runChecklistTick(db, bot, config, { date: TODAY, time: "07:10" });
-      expect(sent).toHaveLength(1);
+      expect(await runChecklistTick(db, bot, config, { date: TODAY, time: "07:05" })).toBe(1);
+      expect(await runChecklistTick(db, bot, config, { date: TODAY, time: "07:10" })).toBe(0);
 
-      const rows = db.select().from(reminderLog).all().filter((r) => r.kind.startsWith("duty_checklist:"));
-      expect(rows).toHaveLength(1);
-      expect(rows[0]!.kind).toMatch(/^duty_checklist:\d+$/);
+      updateShift(db, shift.id, { date: "2026-08-25" });
+      expect(await runChecklistTick(db, bot, config, { date: "2026-08-25", time: "07:05" })).toBe(1);
+      expect(sent).toHaveLength(2);
     });
   });
 
@@ -436,6 +479,41 @@ describe("runChecklistTick", () => {
     function refusal(code: number, description: string): GrammyError {
       return new GrammyError(`Call failed! (${code}: ${description})`, { ok: false, error_code: code, description }, "sendMessage", {});
     }
+
+    it("не добавляет старую ошибочную ссылку на инструкцию к рабочему чек-листу", async () => {
+      const { db, list } = stage();
+      updateChecklist(db, list.id, { docUrl: "просто текст" });
+      const { bot } = fakeBot();
+      const send = vi.mocked(bot.api.sendMessage);
+      send.mockImplementation(async (_chat, _body, options) => {
+        const buttons = options?.reply_markup && "inline_keyboard" in options.reply_markup
+          ? options.reply_markup.inline_keyboard.flat() : [];
+        if (buttons.some((button) => "url" in button && button.url === "просто текст")) {
+          throw refusal(400, "Bad Request: BUTTON_URL_INVALID");
+        }
+        return {} as never;
+      });
+
+      expect(await runChecklistTick(db, bot, config, { date: TODAY, time: "07:05" })).toBe(1);
+      expect(send).toHaveBeenCalledOnce();
+    });
+
+    it("не возвращает старый file_id после замены документа во время загрузки", async () => {
+      const { db, list } = stage();
+      const path = join(mkdtempSync(join(tmpdir(), "planer-doc-tick-")), "Инструкция.pdf");
+      writeFileSync(path, "Прежняя инструкция");
+      updateChecklist(db, list.id, { docPath: path, docName: "Инструкция.pdf" });
+      const { bot } = fakeBot();
+      vi.mocked(bot.api.sendDocument).mockImplementation(async () => {
+        updateChecklist(db, list.id, { docPath: null, docName: "Новая.pdf", docFileId: "new-file" });
+        return { document: { file_id: "old-file" } } as never;
+      });
+
+      await runChecklistTick(db, bot, config, { date: TODAY, time: "07:05" });
+
+      expect(bot.api.sendDocument).toHaveBeenCalledOnce();
+      expect(getChecklist(db, list.id)?.docFileId).toBe("new-file");
+    });
 
     it("файл ушёл, а текст нет — на следующем тике файл не повторяется", async () => {
       const { db, list } = stage();

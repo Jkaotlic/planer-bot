@@ -3,7 +3,21 @@ import react from "@vitejs/plugin-react";
 
 // Served by the server under /app/ once deployed (see server workspace).
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    {
+      name: "planer-startup-style",
+      transformIndexHtml: {
+        order: "post",
+        // Стартовый экран уже имеет свои встроенные стили. Сетевой CSS не
+        // должен задерживать его первый кадр и сигнал готовности Telegram.
+        handler: (html) => html.replace(
+          /<link rel="stylesheet" crossorigin href="\/app\/assets\/[^"]+\.css">/g,
+          (tag) => tag.replace(/>$/, ' media="print" onload="this.media=\'all\'">'),
+        ),
+      },
+    },
+  ],
   base: "/app/",
   build: {
     outDir: "dist",

@@ -292,7 +292,9 @@ Preview ничего не пишет в базу. Подтверждённый �
 ops/backup-db.sh
 ```
 
-Ежедневно в 04:30 — через системный LaunchDaemon (macOS):
+Ежедневно в 04:30 — через системный LaunchDaemon (macOS). Перед установкой
+сверь в plist путь к рабочей копии сервиса, `PLANER_DB` и `PLANER_DOCS_DIR`
+с настройками того сервера, который должен попадать в резервную копию.
 
 ```bash
 sudo cp ops/com.planerbot.backup.plist /Library/LaunchDaemons/

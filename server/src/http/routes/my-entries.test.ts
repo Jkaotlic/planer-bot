@@ -11,7 +11,7 @@ import {
 } from "../../repo/employees";
 import { createShift, getShift, listShiftsInRange } from "../../repo/shifts";
 import { listRecentAudit } from "../../repo/audit";
-import { listHandoversForEntry, getHandover } from "../../repo/handovers";
+import { createHandover, listHandoversForEntry, getHandover } from "../../repo/handovers";
 import { setNoticeMuted } from "../../repo/notice-prefs";
 import { signInitData } from "../../auth/telegram";
 import { teamNow } from "../../util/team-time";
@@ -47,12 +47,13 @@ vi.mock("../../handover/handover-service", async (importOriginal) => {
  * back a `message_id` and can edit: without both the approval service cannot remember its
  * letters, and the «redraw / finish» paths would silently have nothing to act on.
  */
-function fakeBot() {
+function fakeBot(beforeSend?: (recipient: number) => Promise<void>) {
   const sent: { to: number; text: string; extra?: { reply_markup?: unknown } }[] = [];
   const edits: { chat: number; message: number; text: string }[] = [];
   const bot = {
     api: {
       sendMessage: vi.fn(async (to: number, text: string, extra?: { reply_markup?: unknown }) => {
+        await beforeSend?.(to);
         sent.push({ to, text, extra });
         return { message_id: sent.length };
       }),
@@ -405,6 +406,47 @@ describe("больничный работника ждёт ОК", () => {
     expect([getShift(db, sick.id)!.approvedDate, getShift(db, sick.id)!.approvedEndDate]).toEqual([day(2), day(3)]);
     await rejectSickLeave(sickApprovalDeps(null, db, config), sick.id, 1);
     expect([getShift(db, sick.id)!.date, getShift(db, sick.id)!.endDate]).toEqual([day(2), day(3)]);
+  });
+
+  it("rejecting an extension while a colleague receives the cancellation cannot restore a day the worker dropped", async () => {
+    const db = makeTestDb();
+    const me = worker(db, 751, "Аня");
+    const admin = worker(db, 752, "Игорь");
+    setEmployeeAdmin(db, admin.id, true);
+    const colleague = worker(db, 753, "Марк");
+    const sick = createShift(db, {
+      employeeId: me.id, category: "sick_leave", date: day(1), endDate: day(3),
+      approvalRequestedAt: new Date(), approvedByEmployeeId: admin.id, approvedDate: day(1), approvedEndDate: day(2),
+    });
+    const shift = createShift(db, { employeeId: me.id, date: day(1), start: "09:00", end: "18:00" });
+    const handover = createHandover(db, {
+      shiftId: shift.id, sickEntryId: sick.id, fromEmployeeId: me.id, offeredToEmployeeId: colleague.id, status: "offered",
+    });
+    let entered!: () => void;
+    let release!: () => void;
+    const sendingCancellation = new Promise<void>((resolve) => { entered = resolve; });
+    const sendAnyway = new Promise<void>((resolve) => { release = resolve; });
+    const { bot } = fakeBot(async (recipient) => {
+      if (recipient !== 753) return;
+      entered();
+      await sendAnyway;
+    });
+    const app = createApp({ db, config, bot });
+    const workerToken = await tokenFor(app, 751);
+    const adminToken = await tokenFor(app, 752);
+    const patch = app.request(`/api/my/entries/${sick.id}`, authed(workerToken, {
+      category: "sick_leave", date: day(2), endDate: day(3),
+    }, "PATCH"));
+
+    await sendingCancellation;
+    const rejection = await app.request(`/api/admin/sick-approvals/${sick.id}/reject`, authed(adminToken));
+    release();
+    expect(rejection.status).toBe(200);
+    expect((await patch).status).toBe(200);
+    expect(getHandover(db, handover.id)?.status).toBe("cancelled");
+    expect(getShift(db, sick.id)).toMatchObject({
+      date: day(2), endDate: null, approvalRequestedAt: null, approvedDate: null, approvedEndDate: null,
+    });
   });
 
   it("an empty intersection is a plain pending sick leave: no snapshot, ❌ deletes", async () => {

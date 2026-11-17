@@ -338,13 +338,13 @@ describe("колбэки заказа", () => {
     expect(api.sent.filter((m) => m.text.includes("Что заказать:"))).toHaveLength(summaryCount);
   });
 
-  it("админ закрывает чужой приём — «сводка ушла тому, кто собирал заказ»", async () => {
+  it("админ закрывает чужой приём и видит, кому отправляется сводка", async () => {
     const { db, bot, order } = stage();
     const lena = admin(db, "Лена", 555);
     const api = recordApi(bot);
     await tap(bot, 555, `order:close:${order.id}`);
     expect(getOrder(db, order.id)!.closedAt).not.toBeNull();
-    expect(api.answers.at(-1)).toBe("Приём закрыт, сводка ушла тому, кто собирал заказ");
+    expect(api.answers.at(-1)).toBe("Приём закрыт. Отправляю сводку тому, кто собирал заказ");
     const entry = listRecentAudit(db, 10).find((row) => row.type === "order_closed");
     expect(entry?.actorEmployeeId).toBe(lena.id);
   });

@@ -3,7 +3,7 @@ import type { UserFromGetMe } from "grammy/types";
 import { safeErrorMessage } from "../util/safe-error";
 
 export interface KeepPollingDeps {
-  bot: Pick<Bot, "start">;
+  bot: Pick<Bot, "api" | "start">;
   onStart(info: UserFromGetMe): void;
   log(line: string): void;
   sleep(ms: number): Promise<void>;
@@ -51,14 +51,21 @@ function isBadToken(error: unknown): boolean {
 export async function keepPolling(deps: KeepPollingDeps): Promise<void> {
   const maxAttempts = deps.maxAttempts ?? 10;
   let failures = 0;
+  let started = false;
+  deps.bot.api.config.use(async (prev, method, payload, signal) => {
+    const response = await prev(method, payload, signal);
+    // grammY вызывает onStart до первого getUpdates: при постоянном 409
+    // подготовка успешна, но сбрасывать счётчик ещё рано.
+    if (method === "getUpdates" && response.ok) failures = 0;
+    return response;
+  });
   for (;;) {
     try {
       await deps.bot.start({
         timeout: POLL_TIMEOUT_S,
         onStart: (info) => {
-          // Опрос пошёл — значит, предыдущие отказы кончились; следующий 409
-          // через неделю не должен досчитывать до падения старые.
-          failures = 0;
+          if (started) return;
+          started = true;
           deps.onStart(info);
         },
       });

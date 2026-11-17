@@ -68,6 +68,22 @@ describe("граница падения", () => {
     expect(urls.some((url) => url.includes("/api/client-error"))).toBe(true);
   });
 
+  it("отправляет адрес упавшего экрана без параметров запуска", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 204 }));
+    const original = location.href;
+    history.replaceState(null, "", "/app/?tgWebAppData=synthetic#tgWebAppVersion=9");
+    try {
+      await act(async () => {
+        root!.render(createElement(CrashBoundary, null, createElement(Boom)));
+      });
+
+      const report = fetchSpy.mock.calls.find(([url]) => url === "/api/client-error");
+      expect(JSON.parse(String(report?.[1]?.body))).toMatchObject({ url: "/app/" });
+    } finally {
+      history.replaceState(null, "", original);
+    }
+  });
+
   it("исправный экран не трогает", async () => {
     await act(async () => {
       root!.render(createElement(CrashBoundary, null, createElement("p", null, "всё хорошо")));

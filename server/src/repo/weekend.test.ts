@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee } from "./employees";
-import { createShift } from "./shifts";
+import { createShift, deleteShift, updateShift } from "./shifts";
 import {
   createVacantSlot,
   listOpenSlots,
@@ -111,6 +111,35 @@ describe("weekend market repos", () => {
     expect(inRange.map((w) => [w.employeeId, w.date])).toEqual([[worker.id, julySlot.date]]);
     void augAssignment;
     void julyAssignment;
+  });
+
+  it.each(["reassigned", "recategorized", "deleted"])("excludes confirmed work from payment and fairness if its entry was %s", (change) => {
+    const db = makeTestDb();
+    const worker = createEmployee(db, { displayName: "Игорь" });
+    const other = createEmployee(db, { displayName: "Аня" });
+    const slot = createVacantSlot(db, { date: "2026-07-18", start: "09:00", end: "17:00" });
+    const assignment = createAssignment(db, { slotId: slot.id, employeeId: worker.id, hours: 8 });
+    const shift = createShift(db, { date: slot.date, start: slot.start, end: slot.end, category: "weekend_work", employeeId: worker.id });
+    confirmAssignment(db, assignment.id, shift.id);
+    if (change === "reassigned") updateShift(db, shift.id, { employeeId: other.id });
+    if (change === "recategorized") updateShift(db, shift.id, { category: "shift" });
+    if (change === "deleted") deleteShift(db, shift.id);
+
+    expect(countConfirmedByEmployeeInMonth(db, worker.id, "2026-07")).toBe(0);
+    expect(listConfirmedWorkInRange(db, "2026-07-01", "2026-07-31")).toEqual([]);
+  });
+
+  it("confirmed work moved to another month counts in the new month", () => {
+    const db = makeTestDb();
+    const worker = createEmployee(db, { displayName: "Игорь" });
+    const slot = createVacantSlot(db, { date: "2026-07-18", start: "09:00", end: "17:00" });
+    const assignment = createAssignment(db, { slotId: slot.id, employeeId: worker.id, hours: 8 });
+    const shift = createShift(db, { date: slot.date, start: slot.start, end: slot.end, category: "weekend_work", employeeId: worker.id });
+    confirmAssignment(db, assignment.id, shift.id);
+    updateShift(db, shift.id, { date: "2026-08-01" });
+
+    expect(countConfirmedByEmployeeInMonth(db, worker.id, "2026-07")).toBe(0);
+    expect(countConfirmedByEmployeeInMonth(db, worker.id, "2026-08")).toBe(1);
   });
 });
 

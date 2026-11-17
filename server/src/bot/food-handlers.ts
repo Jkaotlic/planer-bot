@@ -1,17 +1,19 @@
 import { InlineKeyboard, type Bot, type Context } from "grammy";
-import { closesLetterLabel, formatKg, isOpenAt, orderTotal, pollChoiceSchema, TELEGRAM_TEXT_SAFE_MAX } from "@planer/shared";
+import { closesLetterLabel, formatKg, isOpenAt, pollChoiceSchema, TELEGRAM_TEXT_SAFE_MAX } from "@planer/shared";
 import type { Config } from "../config";
 import type { Db } from "../db/client";
 import type { Employee } from "../db/schema";
 import { teamNow } from "../util/team-time";
 import { safeErrorMessage } from "../util/safe-error";
 import { recordAudit } from "../repo/audit";
-import { castVote, closePoll, getPoll, listPollsFor, pollView, canManage } from "../polls/poll-service";
-import { finishPollMessages, pollKeyboard, pollTextFor } from "../polls/poll-messenger";
-import { addMenuItem, closeOrder, declineOrder, getOrder, itemsOf, listOrdersFor, removeLastItem, type RemovedStep } from "../orders/order-service";
+import { castVote, getPoll, listPollsFor, pollView, canManage } from "../polls/poll-service";
+import { pollKeyboard, pollTextFor } from "../polls/poll-messenger";
+import { addMenuItem, declineOrder, getOrder, itemsOf, listOrdersFor, removeLastItem, type RemovedStep } from "../orders/order-service";
 import { setOrderPaid, unpaidDebtors } from "../orders/order-payment-service";
 import { notifyUser } from "./notify";
-import { finishOrderMessages, orderKeyboard, orderMenu, orderTextFor, payDoneKeyboard, placeName, remindUnpaid } from "../orders/order-messenger";
+import { orderKeyboard, orderMenu, orderTextFor, payDoneKeyboard, remindUnpaid } from "../orders/order-messenger";
+import { closeOrderWithMessages, closePollWithMessages } from "../food/food-close";
+import { deliverFoodCloseMessages } from "../food/food-close-delivery";
 
 export interface FoodHandlerDeps {
   db: Db;
@@ -161,7 +163,7 @@ export function installFoodHandlers(bot: Bot, deps: FoodHandlerDeps): { sendServ
    *
    * Заказ читается здесь, после ответа на тап, и проверяется заново: пока
    * Telegram отвечал, приём мог закрыться (кнопка запускающего, тик), и
-   * `finishOrderMessages` уже погасил кнопки. Правка с клавиатурой вернула бы
+   * отправитель уже мог погасить кнопки. Правка с клавиатурой вернула бы
    * их закрытому заказу. Тап записан до закрытия, поэтому «Твой заказ»
    * правдив — меняем только текст, а без клавиатуры Telegram её снимает.
    * Тот же приём, что у голоса в опросе.
@@ -226,16 +228,13 @@ export function installFoodHandlers(bot: Bot, deps: FoodHandlerDeps): { sendServ
     if (!who.ok) { await ctx.answerCallbackQuery({ text: who.text }); return; }
     const poll = getPoll(db, Number(ctx.match[1]));
     if (!poll) { await ctx.answerCallbackQuery({ text: "Опрос удалён." }); return; }
-    const result = closePoll(db, poll, viewerOf(who.me, ctx.from.id));
+    const result = closePollWithMessages(db, poll, viewerOf(who.me, ctx.from.id), "closed");
     if (!result.ok) { await ctx.answerCallbackQuery({ text: result.error }); return; }
-    recordAudit(db, "poll_closed", who.me.id, { pollId: poll.id, question: poll.question });
-    // Опрос уже закрыт в базе, и второго шанса разослать итог не будет: тик
-    // берёт только незакрытые. Поэтому отказ ответа на тап (сеть, запрос
-    // старше 15 минут) не должен оборвать обработчик до рассылки.
+    // Итог уже в очереди. Пробуем отправить сразу даже при просроченном тапе.
     await ctx.answerCallbackQuery({ text: "Опрос закрыт, итог рассылаю" }).catch((err) => {
       console.error("bot: poll close answer failed:", safeErrorMessage(err));
     });
-    inBackground("poll close fan-out", finishPollMessages(bot, db, getPoll(db, poll.id)!, "closed"));
+    inBackground("poll close fan-out", deliverFoodCloseMessages(db, bot, `poll:${poll.id}`));
   });
 
   bot.callbackQuery(/^order:add:(\d+):(\d+)$/, async (ctx) => {
@@ -281,21 +280,17 @@ export function installFoodHandlers(bot: Bot, deps: FoodHandlerDeps): { sendServ
     if (!who.ok) { await ctx.answerCallbackQuery({ text: who.text }); return; }
     const order = getOrder(db, Number(ctx.match[1]));
     if (!order) { await ctx.answerCallbackQuery({ text: "Заказ удалён." }); return; }
-    const result = closeOrder(db, order, viewerOf(who.me, ctx.from.id));
+    const result = closeOrderWithMessages(db, order, viewerOf(who.me, ctx.from.id), "closed");
     if (!result.ok) { await ctx.answerCallbackQuery({ text: result.error }); return; }
-    const fresh = getOrder(db, order.id)!;
-    recordAudit(db, "order_closed", who.me.id, { orderId: fresh.id, placeName: placeName(db, fresh), total: orderTotal(itemsOf(db, fresh.id)) });
-    // Сводка всегда уходит тому, кто собирал заказ (`finishOrderMessages`), а
+    // Сводка уходит тому, кто собирал заказ, а
     // закрыть может ещё и админ — за него самого. «У тебя в чате» врало бы
     // админу, закрывшему чужой приём: сводка появится не у него.
-    // Отказ ответа не обрывает рассылку — по той же причине, что у опроса выше:
-    // заказ уже закрыт, и без этой волны сводка и «сдай» не уйдут никогда.
     await ctx.answerCallbackQuery({
-      text: who.me.id === fresh.createdBy ? "Приём закрыт, сводка у тебя в чате" : "Приём закрыт, сводка ушла тому, кто собирал заказ",
+      text: who.me.id === order.createdBy ? "Приём закрыт. Отправляю сводку" : "Приём закрыт. Отправляю сводку тому, кто собирал заказ",
     }).catch((err) => {
       console.error("bot: order close answer failed:", safeErrorMessage(err));
     });
-    inBackground("order close fan-out", finishOrderMessages(bot, db, fresh, "closed", config.publicUrl));
+    inBackground("order close fan-out", deliverFoodCloseMessages(db, bot, `order:${order.id}`));
   });
 
   bot.callbackQuery(/^order:paid:(\d+)$/, async (ctx) => {

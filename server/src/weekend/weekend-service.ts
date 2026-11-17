@@ -14,15 +14,15 @@ import {
   listMyInterestSlotIds,
   createAssignment,
   confirmAssignment,
-  listAssignmentsForEmployee,
-  listAssignmentsForSlot,
+  listLiveOffersForEmployee,
+  listLiveAssignmentsForSlot,
   listConfirmedWorkInRange,
   countConfirmedByEmployeeInMonth,
   countPassedOver,
   getAssignment,
+  getLiveAssignment,
   findAssignment,
   deleteAssignment,
-  reofferAssignment,
   setAssignmentShift,
 } from "../repo/weekend";
 import { createShift, deleteShift, listShiftsOverlapping } from "../repo/shifts";
@@ -125,9 +125,7 @@ export function closeSlot(
   const slot = getVacantSlot(db, slotId);
   if (!slot) return { ok: false, reason: "not_found" };
   if (slot.status === "closed") return { ok: true, changed: false, toldOff: [] };
-  const assigned = new Set(
-    listAssignmentsForSlot(db, slotId).filter((a) => a.status !== "declined").map((a) => a.employeeId),
-  );
+  const assigned = new Set(listLiveAssignmentsForSlot(db, slotId).map((a) => a.employeeId));
   const toldOff = listInterestedEmployeeIds(db, slotId).filter((id) => !assigned.has(id));
   setSlotStatus(db, slotId, "closed");
   return { ok: true, changed: true, toldOff };
@@ -146,7 +144,7 @@ export function withdrawInterest(
   const slot = getVacantSlot(db, slotId);
   if (!slot) return { ok: false, reason: "not_found" };
   const assigned = findAssignment(db, slotId, employeeId);
-  if (assigned && assigned.status !== "declined") return { ok: false, reason: "already_assigned" };
+  if (assigned && getLiveAssignment(db, assigned.id)) return { ok: false, reason: "already_assigned" };
   // `removed` — был ли отклик: повторный тап или устаревший экран не должны
   // писать в журнал «отозвал(а)» то, чего не было.
   return { ok: true, removed: removeInterest(db, slotId, employeeId) };
@@ -230,16 +228,15 @@ export function assignSlot(db: Db, slotId: number, employeeId: number, today: st
   // re-assigning someone who already confirmed) changes nothing. In particular this
   // never bounces a confirmed worker back to "offered" — they didn't decline, so
   // demanding a fresh confirmation would be a false "please reconfirm".
-  if (existing && existing.status !== "declined" && existing.shiftId != null) {
-    return { ok: true, assignment: existing, changed: false };
-  }
+  const live = existing && getLiveAssignment(db, existing.id);
+  if (live) return { ok: true, assignment: live, changed: false };
 
   // Слот пишет человеку запись в график — поверх его же смены или ночи накануне
   // это два места сразу и двойная оплата в ведомости. Отпуск не мешает: по его
   // решению от 2026-07-30 это пометка в списке желающих, а не запрет. Стоит после
   // no-op ветки выше: живое назначение уже держит свою запись, и та сделала бы
-  // повторное «Назначить» отказом «занят» самим собой. Дальше записи слота у
-  // человека нет: отказ её удалил, а ветка починки потому и чинит, что её нет.
+  // повторное «Назначить» отказом «занят» самим собой. Перенесённая вручную
+  // запись остаётся в графике и тоже может пересекаться с новым предложением.
   const clash = busyWith(db, employeeId, slot, { ignoreAbsences: true });
   if (clash) return { ok: false, reason: "busy", clash };
 
@@ -247,6 +244,9 @@ export function assignSlot(db: Db, slotId: number, employeeId: number, today: st
   // two tables: an entry no assignment accounts for shows the slot as unstaffed
   // while the person's calendar says they work it.
   return db.transaction(() => {
+    // A fresh message gets a fresh ID. Otherwise «Не смогу» on the old message
+    // would also cancel the new offer.
+    if (existing) deleteAssignment(db, existing.id);
     const shift = createShift(db, {
       date: slot.date,
       start: slot.start,
@@ -257,18 +257,6 @@ export function assignSlot(db: Db, slotId: number, employeeId: number, today: st
       location: slot.location,
     });
 
-    if (existing) {
-      if (existing.status === "declined") {
-        // Re-offering someone who previously declined reuses their row (slot+employee is unique).
-        reofferAssignment(db, existing.id, shift.id);
-        return { ok: true, assignment: { ...existing, status: "offered", shiftId: shift.id, confirmedAt: null }, changed: true };
-      }
-      // offered/confirmed but its shift link had gone missing (e.g. the schedule entry was
-      // deleted directly) — repair the link without touching status or creating a duplicate.
-      setAssignmentShift(db, existing.id, shift.id);
-      return { ok: true, assignment: { ...existing, shiftId: shift.id }, changed: true };
-    }
-
     const hours = shiftDurationHours({ start: slot.start, end: slot.end });
     const assignment = createAssignment(db, { slotId, employeeId, hours });
     setAssignmentShift(db, assignment.id, shift.id);
@@ -278,15 +266,16 @@ export function assignSlot(db: Db, slotId: number, employeeId: number, today: st
 
 /** Admin removes someone from a slot: drops their schedule entry and the assignment. */
 export function unassign(db: Db, assignmentId: number): UnassignOutcome {
-  const assignment = getAssignment(db, assignmentId);
-  if (!assignment) return { ok: false, reason: "not_found" };
   // Both or neither: an assignment whose entry is gone puts somebody on the slot
-  // with nothing in their schedule.
-  db.transaction(() => {
-    if (assignment.shiftId != null) deleteShift(db, assignment.shiftId);
+  // with nothing in their schedule. On a stale link, only clear the assignment.
+  return db.transaction(() => {
+    const assignment = getAssignment(db, assignmentId);
+    if (!assignment) return { ok: false, reason: "not_found" };
+    const live = getLiveAssignment(db, assignmentId);
+    if (live?.shiftId != null) deleteShift(db, live.shiftId);
     deleteAssignment(db, assignmentId);
+    return { ok: true, employeeId: assignment.employeeId, slotId: assignment.slotId };
   });
-  return { ok: true, employeeId: assignment.employeeId, slotId: assignment.slotId };
 }
 
 /** Who is on this slot right now (declined people drop off), for admins and workers alike. */
@@ -294,7 +283,7 @@ export function assigneesForSlot(
   db: Db,
   slotId: number,
 ): { assignmentId: number; employeeId: number; name: string; status: "offered" | "confirmed" }[] {
-  const live = listAssignmentsForSlot(db, slotId).filter((a) => a.status !== "declined");
+  const live = listLiveAssignmentsForSlot(db, slotId);
   // The slot list calls this once per slot: names in one read, not one per assignee.
   const people = employeesByIds(db, live.map((a) => a.employeeId));
   return live
@@ -318,55 +307,43 @@ function offerPassed(db: Db, slotId: number, today: string): boolean {
 }
 
 export function confirmOffer(db: Db, assignmentId: number, actingEmployeeId: number, today: string): ConfirmOutcome {
-  const assignment = listAssignmentsForEmployee(db, actingEmployeeId).find((a) => a.id === assignmentId);
-  if (!assignment) return { ok: false, reason: "not_yours" };
+  return db.transaction(() => {
+    const offer = pendingOffer(db, assignmentId, actingEmployeeId, today);
+    if (!offer.ok) return offer;
+    // Оффер мог уйти до того, как человека вывели из раздачи или сделали
+    // наблюдателем. Отказ по-прежнему возможен: админ узнает, что место свободно.
+    const me = getEmployeeById(db, actingEmployeeId);
+    if (!me || !takesPartInAssignment(me)) return { ok: false, reason: "not_participating" };
+    const shiftId = getLiveAssignment(db, assignmentId)?.shiftId;
+    // Админ мог удалить запись вручную. «Беру» подтверждает назначение,
+    // а создание смены остаётся действием админа.
+    if (shiftId == null) return { ok: false, reason: "not_offered" };
+    confirmAssignment(db, assignmentId, shiftId);
+    return offer;
+  });
+}
+
+function pendingOffer(db: Db, assignmentId: number, actingEmployeeId: number, today: string): ConfirmOutcome {
+  const assignment = getAssignment(db, assignmentId);
+  if (!assignment || assignment.employeeId !== actingEmployeeId) return { ok: false, reason: "not_yours" };
   if (assignment.status !== "offered") return { ok: false, reason: "not_offered" };
   if (offerPassed(db, assignment.slotId, today)) return { ok: false, reason: "slot_passed" };
-  // Оффер мог уйти до того, как человека вывели из раздачи или сделали
-  // наблюдателем, а кнопка в чате живёт вечно. Остальные пути этого файла
-  // спрашивают то же самое — этот был единственным без вопроса.
-  const me = getEmployeeById(db, actingEmployeeId);
-  if (!me || !takesPartInAssignment(me)) return { ok: false, reason: "not_participating" };
-  // The entry was created when the admin assigned it; accepting just records that.
-  if (assignment.shiftId != null) {
-    confirmAssignment(db, assignmentId, assignment.shiftId);
-    return { ok: true, slotId: assignment.slotId };
-  }
-  const slot = getVacantSlot(db, assignment.slotId);
-  if (!slot) return { ok: false, reason: "slot_missing" };
-  // Both or neither. Half of this leaves the offer `offered` with no shift link and
-  // an orphan entry in the schedule — and the next «Назначить» writes a *second*
-  // entry for the same day.
-  db.transaction(() => {
-    const shift = createShift(db, {
-      date: slot.date,
-      start: slot.start,
-      end: slot.end,
-      category: "weekend_work",
-      employeeId: actingEmployeeId,
-      title: slot.title ?? "Работа в выходной",
-      location: slot.location,
-    });
-    confirmAssignment(db, assignmentId, shift.id);
-  });
   return { ok: true, slotId: assignment.slotId };
 }
 
 export function declineOffer(db: Db, assignmentId: number, actingEmployeeId: number, today: string): ConfirmOutcome {
-  const assignment = listAssignmentsForEmployee(db, actingEmployeeId).find((a) => a.id === assignmentId);
-  if (!assignment) return { ok: false, reason: "not_yours" };
-  if (assignment.status !== "offered") return { ok: false, reason: "not_offered" };
-  if (offerPassed(db, assignment.slotId, today)) return { ok: false, reason: "slot_passed" };
-  // Turning it down pulls the entry back out of the schedule; the slot itself stays
-  // open for someone else (it was never closed by assigning).
-  db.transaction(() => {
-    if (assignment.shiftId != null) deleteShift(db, assignment.shiftId);
+  return db.transaction(() => {
+    const offer = pendingOffer(db, assignmentId, actingEmployeeId, today);
+    if (!offer.ok) return offer;
+    const shiftId = getLiveAssignment(db, assignmentId)?.shiftId;
+    if (shiftId == null) return { ok: false, reason: "not_offered" };
+    deleteShift(db, shiftId);
     db.update(weekendAssignments)
       .set({ status: "declined", shiftId: null })
       .where(eq(weekendAssignments.id, assignmentId))
       .run();
+    return offer;
   });
-  return { ok: true, slotId: assignment.slotId };
 }
 
 /**
@@ -426,8 +403,5 @@ export function openSlotsForWorker(
 }
 
 export function myOffers(db: Db, employeeId: number): { assignment: WeekendAssignment; slot: VacantSlot }[] {
-  return listAssignmentsForEmployee(db, employeeId)
-    .filter((a) => a.status === "offered" || a.status === "confirmed")
-    .map((a) => ({ assignment: a, slot: getVacantSlot(db, a.slotId) }))
-    .filter((x): x is { assignment: WeekendAssignment; slot: VacantSlot } => x.slot != null);
+  return listLiveOffersForEmployee(db, employeeId);
 }
