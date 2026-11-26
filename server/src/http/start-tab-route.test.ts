@@ -1,7 +1,9 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import { sql } from "drizzle-orm";
 import { createApp } from "./app";
 import { makeTestDb } from "../db/testdb";
-import { createEmployee, linkTelegramAccount, getEmployeeById } from "../repo/employees";
+import { createEmployee, linkTelegramAccount, getEmployeeById, setEmployeeObserver } from "../repo/employees";
+import { listRecentAudit } from "../repo/audit";
 import { signInitData } from "../auth/telegram";
 import { testConfig } from "../test-config";
 
@@ -102,6 +104,78 @@ describe("PATCH /api/me/settings — стартовая вкладка", () => {
 
     expect(res.status).toBe(403);
     expect(getEmployeeById(db, igor.id)!.startTab).toBeNull();
+  });
+
+  it("отказ в стартовой вкладке сохраняет прежнюю самозапись и ничего не пишет в журнал", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const igor = worker(db, 333);
+    setEmployeeObserver(db, igor.id, true);
+    const token = await tokenFor(app, 333);
+
+    const res = await app.request("/api/me/settings", patch(token, {
+      selfScheduleEnabled: true,
+      startTab: "admin",
+    }));
+
+    expect(res.status).toBe(403);
+    expect(getEmployeeById(db, igor.id)).toMatchObject({ selfScheduleEnabled: false, startTab: null });
+    expect(listRecentAudit(db, 10).filter((row) => row.type === "settings_changed")).toHaveLength(0);
+  });
+
+  it("при отказе записи аудита откатывает весь составной PATCH", async () => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const igor = worker(db, 333);
+    setEmployeeObserver(db, igor.id, true);
+    const token = await tokenFor(app, 333);
+    db.run(sql`CREATE TEMP TRIGGER reject_settings_audit BEFORE INSERT ON audit_log
+      WHEN NEW.type = 'settings_changed' BEGIN SELECT RAISE(ABORT, 'test audit rejected'); END`);
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      const res = await app.request("/api/me/settings", patch(token, {
+        selfScheduleEnabled: true,
+        startTab: "team",
+        remindersEnabled: false,
+      }));
+
+      expect(res.status).toBe(500);
+      expect(getEmployeeById(db, igor.id)).toMatchObject({
+        selfScheduleEnabled: false,
+        startTab: null,
+        remindersEnabled: true,
+      });
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it.each([{ body: null }, { body: [] }, { body: true }, { body: 42 }, { body: "team" }])(
+    "отклоняет JSON $body вместо объекта настроек",
+    async ({ body }) => {
+      const db = makeTestDb();
+      const app = createApp({ db, config });
+      worker(db, 333);
+
+      const res = await app.request("/api/me/settings", patch(await tokenFor(app, 333), body));
+
+      expect(res.status).toBe(400);
+    },
+  );
+
+  it.each([
+    ["PATCH", "/api/me/notifications"],
+    ["PUT", "/api/admin/settings/reminder-hour"],
+    ["PUT", "/api/admin/settings/swaps-lock"],
+    ["PUT", "/api/admin/settings/holidays-auto"],
+  ])("%s %s отклоняет JSON null", async (method, path) => {
+    const app = createApp({ db: makeTestDb(), config });
+    const token = await tokenFor(app, 111);
+
+    const res = await app.request(path, { ...patch(token, null), method });
+
+    expect(res.status).toBe(400);
   });
 
   it("админу «Админ» записать даёт", async () => {

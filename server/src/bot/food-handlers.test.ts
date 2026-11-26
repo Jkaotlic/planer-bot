@@ -6,7 +6,7 @@ import { recordApi, stubBotInfo } from "./testbot";
 import { BTN_SERVICES, LEGACY_BTN_FOOD } from "./keyboard";
 import { makeTestDb } from "../db/testdb";
 import { createEmployee, linkTelegramAccount } from "../repo/employees";
-import { cancelPoll, castVote, closePoll, createPoll, getPoll, setTelegramPollMessage, voteOf } from "../polls/poll-service";
+import { cancelPoll, castVote, closeDuePolls, closePoll, createPoll, getPoll, setTelegramPollMessage, voteOf } from "../polls/poll-service";
 import { createPlace } from "../orders/place-service";
 import { addCustomItem, addMenuItem, cancelOrder, closeOrder, createOrder, getOrder, itemsOf } from "../orders/order-service";
 import { orderPayments } from "../orders/order-payment-service";
@@ -141,14 +141,14 @@ describe("кнопка «🧰 Сервисы»", () => {
 });
 
 describe("колбэки опроса", () => {
-  it("принимает окончательный итог Telegram для карточки уже закрытого опроса", async () => {
+  it("принимает окончательный итог Telegram для опроса, закрытого по сроку", async () => {
     const { bot, db, anya, igor } = stage();
     const poll = createPoll(db, {
-      createdBy: anya.id, question: "Когда?", closesAt: null, recipientIds: [anya.id, igor.id],
+      createdBy: anya.id, question: "Когда?", closesAt: "2026-09-29T18:00", recipientIds: [anya.id, igor.id],
       telegram: { options: ["Сегодня", "Завтра"], multiple: false },
     });
     setTelegramPollMessage(db, poll.id, igor.id, { messageId: 100, telegramPollId: "igor-poll", telegramPollChatId: 333 });
-    expect(closePoll(db, poll, anya)).toEqual({ ok: true });
+    expect(closeDuePolls(db, { date: "2026-09-29", time: "18:00" }).map(({ id }) => id)).toEqual([poll.id]);
     await bot.handleUpdate({
       update_id: updateId++,
       poll: {

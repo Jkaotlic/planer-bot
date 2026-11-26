@@ -10,6 +10,7 @@ import { teamTimeAt } from "../util/team-time";
 export const TELEGRAM_STALE_MS = 3 * 60_000;
 
 export type LivenessStatus = { reachable: true } | { reachable: false; since: Date };
+export type PollingStatus = { fresh: true } | { fresh: false; since: Date };
 
 export interface TelegramLiveness {
   /** Telegram ответил — неважно что, хоть 400: до него дошли. */
@@ -17,6 +18,8 @@ export interface TelegramLiveness {
   /** Ответа нет: обрыв по сроку, DNS, сброс соединения. */
   recordFailure(): void;
   status(): LivenessStatus;
+  recordPollSuccess(): void;
+  pollingStatus(): PollingStatus;
 }
 
 export interface LivenessDeps {
@@ -38,6 +41,8 @@ export interface LivenessDeps {
  */
 export function createTelegramLiveness(deps: LivenessDeps): TelegramLiveness {
   let lastOkAt = deps.now();
+  let lastPollOkAt = lastOkAt;
+  let pollingAnnounced = false;
   // Первый отказ после последнего ответа — отсюда «нет связи с 20:02», а не с
   // момента, когда сработал порог.
   let firstFailureAt: number | undefined;
@@ -68,6 +73,24 @@ export function createTelegramLiveness(deps: LivenessDeps): TelegramLiveness {
       status();
     },
     status,
+    recordPollSuccess() {
+      const now = deps.now();
+      if (pollingAnnounced) {
+        const minutes = Math.round((now - lastPollOkAt) / 60_000);
+        deps.log(`telegram: входящие обновления снова поступают, пауза ${minutes} мин`);
+        pollingAnnounced = false;
+      }
+      lastPollOkAt = now;
+    },
+    pollingStatus() {
+      if (deps.now() - lastPollOkAt <= TELEGRAM_STALE_MS) return { fresh: true };
+      const since = new Date(lastPollOkAt);
+      if (!pollingAnnounced) {
+        pollingAnnounced = true;
+        deps.log(`telegram: нет успешного опроса входящих с ${teamTimeAt(since, deps.teamTz)}`);
+      }
+      return { fresh: false, since };
+    },
   };
 }
 

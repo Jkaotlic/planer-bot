@@ -1,6 +1,6 @@
 import { useState } from "react";
 import {
-  POLL_CHOICE_LABEL, POLL_CHOICES, canRemindSilent, cancelPollQuestion, closePollQuestion, pollRemindResultText, pollStatusLabel, pollTallyLines,
+  POLL_CHOICE_LABEL, POLL_CHOICES, canRemindSilent, cancelPollQuestion, closePollQuestion, pollRemindResultText, pollStatusLabel, pollTallyLines, telegramPollDeliveryText,
 } from "@planer/shared";
 import { apiClient, type PollView } from "../../api/client";
 import { ConfirmButton } from "../../components/ConfirmButton";
@@ -47,6 +47,7 @@ export function PollCard({ poll: initial }: { poll: PollView }) {
   const remind = () => attempt(async () => setRemindResult(pollRemindResultText(await apiClient.remindPollSilent(poll.id))));
 
   const { telegram } = poll;
+  const deliveryText = telegramPollDeliveryText(telegram?.delivery);
   const tally = telegram ? [] : pollTallyLines(poll.tally);
   const refresh = () => attempt(async () => setPoll(await apiClient.getPoll(poll.id)), false);
   return (
@@ -75,6 +76,7 @@ export function PollCard({ poll: initial }: { poll: PollView }) {
             {telegram.canVote ? "Проголосуй в личном чате с ботом." : "Опрос проходит в личном чате с ботом."}
             {telegram.canVote && telegram.multiple && " Можно выбрать несколько вариантов."}
           </div>}
+          {deliveryText && <div className="food-meta">{deliveryText}</div>}
           <ul className="food-poll-results" aria-label="Общий итог">
             {telegram.options.map(({ text, count }, index) => (
               <li key={text}>

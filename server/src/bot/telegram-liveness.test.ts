@@ -112,6 +112,8 @@ describe("перехватчик бота кормит трекер", () => {
       recordOk: () => events.push("ok"),
       recordFailure: () => events.push("fail"),
       status: () => ({ reachable: true as const }),
+      recordPollSuccess() {},
+      pollingStatus: () => ({ fresh: true as const }),
     };
     return stubBotInfo(createBot({
       db: makeTestDb(),

@@ -136,6 +136,7 @@ private enum Health: Equatable {
     /// Polling loop is not running at all (`bot: "down"`).
     case botStopped
     case telegramUnreachable(since: Date?)
+    case pollingStale(since: Date?)
     /// Port open, but the health request itself failed or timed out.
     case noAnswer
 
@@ -163,12 +164,13 @@ private func fetchHealth() -> Health {
     guard let data = body,
           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return .noAnswer }
     if json["ok"] as? Bool == true { return .ok }
+    let iso = ISO8601DateFormatter()
+    iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    let since = (json["since"] as? String).flatMap(iso.date(from:))
     switch json["bot"] as? String {
     case "down": return .botStopped
-    case "unreachable":
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return .telegramUnreachable(since: (json["since"] as? String).flatMap(iso.date(from:)))
+    case "unreachable": return .telegramUnreachable(since: since)
+    case "polling_stale": return .pollingStale(since: since)
     default: return .noAnswer
     }
 }
@@ -186,25 +188,68 @@ private func clock(_ date: Date) -> String {
     return formatter.string(from: date)
 }
 
-/// "сегодня в 04:30" for the newest file in the backup folder, or nil if empty.
+private func backupCommand(_ executable: String, _ arguments: [String], captureOutput: Bool = false) -> String? {
+    let task = Process()
+    task.executableURL = URL(fileURLWithPath: executable)
+    task.arguments = arguments
+    let output = captureOutput ? Pipe() : nil
+    task.standardOutput = output as Any? ?? FileHandle.nullDevice
+    task.standardError = FileHandle.nullDevice
+    do { try task.run() } catch { return nil }
+    let data = output?.fileHandleForReading.readDataToEndOfFile()
+    task.waitUntilExit()
+    guard task.terminationStatus == 0 else { return nil }
+    return captureOutput ? data.flatMap { String(data: $0, encoding: .utf8) } : ""
+}
+
+private func legacyBackupIsComplete(_ snapshot: URL, _ archive: URL) -> Bool {
+    let uri = snapshot.absoluteString + "?immutable=1"
+    func query(_ sql: String) -> String? {
+        backupCommand("/usr/bin/sqlite3", ["-readonly", uri, sql], captureOutput: true)?.trimmingCharacters(in: .newlines)
+    }
+    // tar проверяет структуру, но может пропустить повреждение CRC.
+    guard query("PRAGMA quick_check;") == "ok",
+          backupCommand("/usr/bin/gzip", ["-t", archive.path]) != nil,
+          let members = backupCommand("/usr/bin/tar", ["-tzf", archive.path], captureOutput: true),
+          let hasDocPath = query("SELECT count(*) FROM pragma_table_info('checklists') WHERE name='doc_path';") else { return false }
+    if hasDocPath == "0" { return true }
+    guard let documentPaths = query("SELECT doc_path FROM checklists WHERE doc_path <> '';") else { return false }
+    let archiveFiles = Set(members.split(whereSeparator: \.isNewline).filter { !$0.hasSuffix("/") }.map {
+        $0.split(separator: "/").suffix(2).joined(separator: "/")
+    })
+    return documentPaths.split(whereSeparator: \.isNewline).allSatisfy {
+        archiveFiles.contains($0.split(separator: "/").suffix(2).joined(separator: "/"))
+    }
+}
+
+/// Дата последнего полного комплекта, включая читаемые старые пары.
 private func lastBackupDescription() -> String? {
     let fm = FileManager.default
     guard let names = try? fm.contentsOfDirectory(atPath: Config.backupDir) else { return nil }
-    let newest = names
-        .filter { $0.hasSuffix(".db") }
-        .compactMap { name -> Date? in
-            let path = (Config.backupDir as NSString).appendingPathComponent(name)
-            return (try? fm.attributesOfItem(atPath: path))?[.modificationDate] as? Date
-        }
-        .max()
-    guard let date = newest else { return nil }
-
     let formatter = DateFormatter()
     formatter.locale = Locale(identifier: "ru_RU")
     formatter.doesRelativeDateFormatting = true
     formatter.dateStyle = .medium
     formatter.timeStyle = .short
-    return formatter.string(from: date)
+    let root = URL(fileURLWithPath: Config.backupDir, isDirectory: true)
+    for name in names.sorted(by: >) {
+        guard name.range(of: #"^planer-[0-9]{8}-[0-9]{6}\.db$"#, options: .regularExpression) != nil else { continue }
+        let stamp = name.dropFirst("planer-".count).dropLast(".db".count)
+        let snapshot = root.appendingPathComponent(name)
+        let archive = root.appendingPathComponent("planer-docs-\(stamp).tar.gz")
+        let marker = root.appendingPathComponent("planer-\(stamp).complete")
+        let pending = root.appendingPathComponent(".planer-\(stamp).pending")
+        let keys: Set<URLResourceKey> = [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey]
+        guard let dbInfo = try? snapshot.resourceValues(forKeys: keys), dbInfo.isRegularFile == true,
+              (dbInfo.fileSize ?? 0) > 0, let date = dbInfo.contentModificationDate,
+              let archiveInfo = try? archive.resourceValues(forKeys: keys), archiveInfo.isRegularFile == true,
+              (archiveInfo.fileSize ?? 0) > 0 else { continue }
+        if (try? marker.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) != true {
+            guard !fm.fileExists(atPath: pending.path), legacyBackupIsComplete(snapshot, archive) else { continue }
+        }
+        return formatter.string(from: date)
+    }
+    return nil
 }
 
 // MARK: - App
@@ -303,6 +348,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .botStopped: return "⚠︎ Бот не опрашивает Telegram"
         case .telegramUnreachable(let since):
             return "⚠︎ Нет связи с Telegram" + (since.map { " с \(clock($0))" } ?? "")
+        case .pollingStale(let since):
+            return "⚠︎ Бот не получает обновления Telegram" + (since.map { " с \(clock($0))" } ?? "")
         case .noAnswer: return "⚠︎ Сервер не отвечает на проверку"
         }
     }

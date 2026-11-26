@@ -246,7 +246,7 @@ export function installFoodHandlers(bot: Bot, deps: FoodHandlerDeps): { sendServ
     if (!who.ok) { await ctx.answerCallbackQuery({ text: who.text }); return; }
     const poll = getPoll(db, Number(ctx.match[1]));
     if (!poll) { await ctx.answerCallbackQuery({ text: "Опрос удалён." }); return; }
-    const result = closePollWithMessages(db, poll, viewerOf(who.me, ctx.from.id), "closed");
+    const result = closePollWithMessages(db, poll, viewerOf(who.me, ctx.from.id), "closed", teamNow(config.teamTz));
     if (!result.ok) { await ctx.answerCallbackQuery({ text: result.error }); return; }
     // Итог уже в очереди. Пробуем отправить сразу даже при просроченном тапе.
     await ctx.answerCallbackQuery({ text: "Опрос закрыт, итог рассылаю" }).catch((err) => {

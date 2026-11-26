@@ -52,6 +52,7 @@ import { cancelSwapsForEmployeeTx, pendingSwapsForEmployee } from "../../swap/sw
 import { buildExclusionNotices } from "../../swap/swap-lock-notice";
 import { teamNow } from "../../util/team-time";
 import { type Env, requireAdmin, requireAuth } from "../middleware";
+import { jsonBody, jsonObjectBody } from "../json-body";
 
 /** Said at every door that could put two identical ФИО in the active list. Names the
  *  row already holding it, because the fix is to rename one of the two. */
@@ -113,7 +114,7 @@ export function createEmployeesRoutes(deps: { db: Db; config: Config; bot?: Bot 
   );
 
   routes.post("/api/admin/employees", requireAdmin(db, config.jwtSecret), async (c) => {
-    const body = (await c.req.json().catch(() => ({}))) as { displayName?: unknown };
+    const body = await jsonBody(c);
     if (typeof body.displayName !== "string" || body.displayName.trim().length === 0) {
       return c.json({ error: "displayName is required" }, 400);
     }
@@ -146,10 +147,7 @@ export function createEmployeesRoutes(deps: { db: Db; config: Config; bot?: Bot 
   // *after* a loop of awaits — see `setSwapLock`.
   routes.patch("/api/admin/employees/:id", requireAdmin(db, config.jwtSecret), async (c) => {
     const id = Number(c.req.param("id"));
-    const body = (await c.req.json().catch(() => ({}))) as {
-      displayName?: unknown; birthDate?: unknown; preferredName?: unknown;
-      excludedFromAssignment?: unknown; excludedFromSwaps?: unknown; isObserver?: unknown;
-    };
+    const body = await jsonBody(c);
     const hasName = body.displayName !== undefined;
     const hasBirthday = body.birthDate !== undefined;
     const hasPreferred = body.preferredName !== undefined;
@@ -311,7 +309,7 @@ export function createEmployeesRoutes(deps: { db: Db; config: Config; bot?: Bot 
   // (1 = first), and the server renumbers everyone so the column stays contiguous.
   routes.post("/api/admin/employees/:id/order", requireAdmin(db, config.jwtSecret), async (c) => {
     const id = Number(c.req.param("id"));
-    const body = (await c.req.json().catch(() => ({}))) as { position?: unknown };
+    const body = await jsonBody(c);
     if (typeof body.position !== "number" || !Number.isFinite(body.position)) {
       return c.json({ error: "position (number) required" }, 400);
     }
@@ -454,7 +452,7 @@ export function createEmployeesRoutes(deps: { db: Db; config: Config; bot?: Bot 
   // can never demote its last admin and lock everyone out.
   routes.post("/api/admin/employees/:id/role", requireAdmin(db, config.jwtSecret), async (c) => {
     const id = Number(c.req.param("id"));
-    const body = (await c.req.json().catch(() => ({}))) as { isAdmin?: unknown };
+    const body = await jsonBody(c);
     if (typeof body.isAdmin !== "boolean") return c.json({ error: "isAdmin (boolean) required" }, 400);
     const target = getEmployeeById(db, id);
     if (!target) return c.json({ error: "not_found" }, 404);
@@ -494,7 +492,8 @@ export function createEmployeesRoutes(deps: { db: Db; config: Config; bot?: Bot 
   // forces a fresh token (invalidating any previously shared link).
   routes.post("/api/admin/employees/:id/invite", requireAdmin(db, config.jwtSecret), async (c) => {
     const id = Number(c.req.param("id"));
-    const body = (await c.req.json().catch(() => ({}))) as { regenerate?: unknown };
+    const body = await jsonObjectBody(c);
+    if (!body) return c.json({ error: "Тело запроса должно быть объектом JSON" }, 400);
     const emp = getEmployeeById(db, id);
     if (!emp) return c.json({ error: "not_found" }, 404);
     if (emp.telegramUserId != null) return c.json({ error: "already_linked" }, 400);

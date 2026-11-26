@@ -1,7 +1,7 @@
 import { and, desc, eq, gte, inArray, isNull, lte, isNotNull, or, sql } from "drizzle-orm";
 import {
   POLL_OPEN_MAX_DAYS, closesLabel, isOpenAt, pollTally,
-  type PollChoice, type PollView, type TelegramPollConfig, type TelegramPollView,
+  type PollChoice, type PollView, type TelegramPollConfig, type TelegramPollDeliveryView, type TelegramPollView,
 } from "@planer/shared";
 import type { Db } from "../db/client";
 import { employees, pollRecipients, pollVotes, polls, type Poll } from "../db/schema";
@@ -9,6 +9,8 @@ import { employees, pollRecipients, pollVotes, polls, type Poll } from "../db/sc
 export type Result = { ok: true } | { ok: false; error: string };
 export type TeamClock = { date: string; time: string };
 type Viewer = { id: number; isAdmin: boolean };
+
+export const POLL_OPEN_MAX_AGE_MS = POLL_OPEN_MAX_DAYS * 24 * 60 * 60 * 1000;
 
 const telegramPollsSending = new WeakMap<Db, Set<number>>();
 
@@ -48,7 +50,9 @@ export function createPoll(
       telegramMultiple: input.telegram?.multiple,
     }).returning().get();
     for (const employeeId of input.recipientIds) {
-      tx.insert(pollRecipients).values({ pollId: poll.id, employeeId }).onConflictDoNothing().run();
+      tx.insert(pollRecipients).values({
+        pollId: poll.id, employeeId, telegramInviteState: input.telegram ? "pending" : null,
+      }).onConflictDoNothing().run();
     }
     return poll;
   });
@@ -93,8 +97,34 @@ export function setTelegramPollMessage(
   employeeId: number,
   message: { messageId: number; telegramPollId: string; telegramPollChatId: number },
 ): void {
-  db.update(pollRecipients).set(message)
+  db.update(pollRecipients).set({ ...message, telegramInviteState: "delivered" })
     .where(and(eq(pollRecipients.pollId, pollId), eq(pollRecipients.employeeId, employeeId))).run();
+}
+
+/** Оставляем след до сетевого вызова: после аварии Telegram уже мог принять карточку. */
+export function claimTelegramPollInvite(db: Db, pollId: number, employeeId: number, now: number): boolean {
+  return db.update(pollRecipients).set({ telegramInviteState: "unknown" }).where(and(
+    eq(pollRecipients.pollId, pollId), eq(pollRecipients.employeeId, employeeId),
+    eq(pollRecipients.telegramInviteState, "pending"), lte(pollRecipients.telegramInviteRetryAt, now),
+  )).run().changes > 0;
+}
+
+export function resolveTelegramPollInviteFailure(db: Db, pollId: number, employeeId: number, retryAt: number | null): void {
+  db.update(pollRecipients).set(retryAt == null
+    ? { telegramInviteState: "failed" }
+    : { telegramInviteState: "pending", telegramInviteRetryAt: retryAt })
+    .where(and(eq(pollRecipients.pollId, pollId), eq(pollRecipients.employeeId, employeeId),
+      eq(pollRecipients.telegramInviteState, "unknown"))).run();
+}
+
+export function dueTelegramPollInvites(db: Db, now: number): Poll[] {
+  const due = db.selectDistinct({ pollId: pollRecipients.pollId }).from(pollRecipients)
+    .innerJoin(employees, eq(pollRecipients.employeeId, employees.id))
+    .where(and(eq(pollRecipients.telegramInviteState, "pending"), lte(pollRecipients.telegramInviteRetryAt, now),
+      eq(employees.isActive, true), isNotNull(employees.telegramUserId)));
+  return db.select().from(polls)
+    .where(and(isNull(polls.closedAt), isNull(polls.cancelledAt), inArray(polls.id, due)))
+    .orderBy(polls.id).all();
 }
 
 /** Telegram присылает текущее состояние выбора целиком, в том числе пустое при отзыве. */
@@ -102,7 +132,8 @@ export function recordTelegramPollAnswer(
   db: Db, telegramPollId: string, telegramUserId: number, optionIds: readonly number[], now: TeamClock,
 ): boolean {
   const ballot = telegramBallot(db, telegramPollId);
-  if (!ballot?.poll.telegramOptions || ballot.finalized || ballot.chatId !== telegramUserId || !isOpenAt(ballot.poll, now)) return false;
+  if (!ballot?.poll.telegramOptions || ballot.finalized || ballot.chatId !== telegramUserId
+      || !isTelegramPollOpenAt(ballot.poll, now)) return false;
   const options = ballot.poll.telegramOptions;
   const choices = [...new Set(optionIds)].sort((a, b) => a - b);
   if ((!ballot.poll.telegramMultiple && choices.length > 1)
@@ -138,7 +169,7 @@ export function recordTelegramPollState(db: Db, snapshot: {
   if (!snapshot.is_closed || (snapshot.total_voter_count !== 0 && snapshot.total_voter_count !== 1)) return false;
   const ballot = telegramBallot(db, snapshot.id);
   const options = ballot?.poll.telegramOptions;
-  if (!options || ballot.poll.cancelledAt != null || options.length !== snapshot.options.length) return false;
+  if (!options || ballot.poll.cancelledAt != null || ballot.poll.telegramManualClosed || options.length !== snapshot.options.length) return false;
   if (snapshot.options.some(({ text, voter_count }, index) => text !== options[index] || (voter_count !== 0 && voter_count !== 1))) return false;
   const choices = snapshot.options.flatMap(({ voter_count }, index) => voter_count === 1 ? [index] : []);
   if (Number(choices.length > 0) !== snapshot.total_voter_count || (!ballot.poll.telegramMultiple && choices.length > 1)) return false;
@@ -175,6 +206,7 @@ export function pollRecipientRows(db: Db, pollId: number) {
       telegramPollChatId: pollRecipients.telegramPollChatId,
       telegramChoices: pollRecipients.telegramChoices,
       telegramFinalized: pollRecipients.telegramFinalized,
+      telegramInviteState: pollRecipients.telegramInviteState,
     })
     .from(pollRecipients)
     .innerJoin(employees, eq(employees.id, pollRecipients.employeeId))
@@ -215,17 +247,22 @@ export function castVote(db: Db, poll: Poll, employeeId: number, choice: PollCho
  * UPDATE изменил строку, и только он рассылает итог. Иначе люди получили бы
  * итог дважды.
  */
-function finish(db: Db, pollId: number, column: "closedAt" | "cancelledAt"): boolean {
-  const changed = db.update(polls).set({ [column]: new Date() })
+function finish(db: Db, pollId: number, column: "closedAt" | "cancelledAt", telegramManualClosed = false): boolean {
+  const changed = db.update(polls).set({ [column]: new Date(), telegramManualClosed })
     .where(and(eq(polls.id, pollId), isNull(polls.closedAt), isNull(polls.cancelledAt)))
     .run();
   return changed.changes > 0;
 }
 
-export function closePoll(db: Db, poll: Poll, viewer: Viewer): Result {
+export function isTelegramPollOpenAt(poll: Poll, now: TeamClock, at: number = Date.now()): boolean {
+  return isOpenAt(poll, now) && (poll.closesAt != null || at - poll.createdAt.getTime() < POLL_OPEN_MAX_AGE_MS);
+}
+
+export function closePoll(db: Db, poll: Poll, viewer: Viewer, mode: "manual" | "deadline" = "manual"): Result {
   if (!canManage(poll, viewer)) return { ok: false, error: "Закрыть может только тот, кто запустил опрос." };
   if (poll.cancelledAt != null) return { ok: false, error: "Опрос отменён." };
-  return finish(db, poll.id, "closedAt") ? { ok: true } : { ok: false, error: "Опрос уже закрыт." };
+  const manualTelegramClose = mode === "manual" && poll.telegramOptions != null;
+  return finish(db, poll.id, "closedAt", manualTelegramClose) ? { ok: true } : { ok: false, error: "Опрос уже закрыт." };
 }
 
 export function cancelPoll(db: Db, poll: Poll, viewer: Viewer): Result {
@@ -242,7 +279,7 @@ export function cancelPoll(db: Db, poll: Poll, viewer: Viewer): Result {
  * а не граница дня, так что часовой пояс команды ни на что не влияет.
  */
 export function closeDuePolls(db: Db, now: TeamClock, at: Date = new Date()): Poll[] {
-  const tooOld = new Date(at.getTime() - POLL_OPEN_MAX_DAYS * 24 * 60 * 60 * 1000);
+  const tooOld = new Date(at.getTime() - POLL_OPEN_MAX_AGE_MS);
   const due = db.select().from(polls)
     .where(and(isNull(polls.closedAt), isNull(polls.cancelledAt), or(
       and(isNotNull(polls.closesAt), lte(polls.closesAt, `${now.date}T${now.time}`)),
@@ -262,6 +299,22 @@ function hasCurrentTelegramBallot(row: PollRecipientRow): boolean {
 
 function hasTelegramVote(row: PollRecipientRow): boolean {
   return hasCurrentTelegramBallot(row) && (row.telegramChoices?.length ?? 0) > 0;
+}
+
+function telegramPollDelivery(recipients: readonly PollRecipientRow[], open: boolean): TelegramPollDeliveryView | undefined {
+  const delivery: TelegramPollDeliveryView = { pending: [], unknown: [], failed: [] };
+  for (const row of recipients) {
+    if (hasCurrentTelegramBallot(row)) continue;
+    if (row.telegramInviteState === "unknown" || (row.telegramInviteState == null && row.telegramPollId == null)) {
+      delivery.unknown.push(row.displayName);
+    } else if (row.telegramInviteState === "pending" && open && row.telegramUserId != null) {
+      delivery.pending.push(row.displayName);
+    } else {
+      delivery.failed.push(row.displayName);
+    }
+  }
+  if (delivery.pending.length || delivery.unknown.length || delivery.failed.length) return delivery;
+  return undefined;
 }
 
 function summarizeTelegramPoll(poll: Poll, recipients: readonly PollRecipientRow[], viewerId?: number): TelegramPollView {
@@ -287,7 +340,8 @@ export function telegramPollSummary(db: Db, poll: Poll, viewerId?: number): Tele
 export function telegramPollResultText(db: Db, poll: Poll): string {
   const recipients = pollRecipientRows(db, poll.id);
   const { options, votedCount } = summarizeTelegramPoll(poll, recipients);
-  const waiting = poll.closedAt && recipients.some((row) => hasCurrentTelegramBallot(row) && !row.telegramFinalized);
+  const waiting = poll.closedAt && !poll.telegramManualClosed
+    && recipients.some((row) => hasCurrentTelegramBallot(row) && !row.telegramFinalized);
   return [
     `📊 ${waiting ? "Предварительный итог" : "Итоги опроса"}: ${poll.question}`,
     "",
@@ -296,6 +350,18 @@ export function telegramPollResultText(db: Db, poll: Poll): string {
     `Ответили: ${votedCount}`,
     ...(waiting ? ["", "Telegram ещё не подтвердил часть голосов. Общий итог можно обновить в приложении."] : []),
   ].join("\n");
+}
+
+/** Каждый адресат получает один и тот же текст, даже если позже в приложении уточнился результат. */
+export function freezeTelegramPollResult(db: Db, pollId: number): string | null {
+  return db.transaction((tx) => {
+    const poll = getPoll(tx, pollId);
+    if (!poll?.telegramOptions || !poll.closedAt) return null;
+    if (poll.telegramResultText != null) return poll.telegramResultText;
+    const text = telegramPollResultText(tx, poll);
+    tx.update(polls).set({ telegramResultText: text }).where(eq(polls.id, pollId)).run();
+    return text;
+  });
 }
 
 /**
@@ -311,7 +377,8 @@ export function pollView(db: Db, poll: Poll, viewer: Viewer, now: TeamClock): Po
     .from(pollVotes).where(eq(pollVotes.pollId, poll.id)).all();
   const creatorName = db.select({ name: employees.displayName }).from(employees)
     .where(eq(employees.id, poll.createdBy)).get()?.name ?? "—";
-  const open = isOpenAt(poll, now);
+  const open = telegram ? isTelegramPollOpenAt(poll, now) : isOpenAt(poll, now);
+  const delivery = telegram && manage ? telegramPollDelivery(recipients, open) : undefined;
   return {
     id: poll.id,
     question: poll.question,
@@ -326,7 +393,7 @@ export function pollView(db: Db, poll: Poll, viewer: Viewer, now: TeamClock): Po
     myChoice: votes.find((v) => v.employeeId === viewer.id)?.choice ?? null,
     tally: pollTally(telegram ? recipients.filter((row) => !hasTelegramVote(row)) : recipients, votes),
     recipientCount: recipients.length,
-    ...(telegram ? { telegram: { ...telegram, canVote: open && telegram.canVote } } : {}),
+    ...(telegram ? { telegram: { ...telegram, canVote: open && telegram.canVote, ...(delivery ? { delivery } : {}) } } : {}),
   };
 }
 

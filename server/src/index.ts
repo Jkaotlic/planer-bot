@@ -24,6 +24,7 @@ import { installLogTimestamps } from "./util/log-time";
 import { createTickScheduler } from "./util/ticks";
 import { runWeekendNudgeTick } from "./weekend/weekend-nudge";
 import { runFoodTick } from "./food/food-tick";
+import { retryTelegramPollInvites } from "./polls/poll-messenger";
 import { runSickApprovalReminderTick } from "./sick-approval/sick-approval-service";
 
 // Первым делом, до чтения конфига: сорваться можно уже на нём, а сорванный дамп
@@ -47,6 +48,7 @@ void keepPolling({
     console.log(`bot @${info.username} started`);
     void publishBotCommands(bot, db);
   },
+  onPollSuccess: () => liveness.recordPollSuccess(),
   log: (line) => console.error(line),
   sleep: (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms)),
   exit: (code) => process.exit(code),
@@ -65,7 +67,7 @@ const fetchHolidays = xmlcalendarFetcher();
 // У каждого тика свой флаг «идёт» (`createTickScheduler`): медленный пропускает
 // свои круги сам, а не держит соседей.
 const tickRound = createTickScheduler([
-    { name: "reminder", run: () => runReminderTick(db, bot, teamNow(config.teamTz), config.publicUrl, config.shiftReminderWidgetEnabled) },
+    { name: "reminder", run: () => runReminderTick(db, bot, () => teamNow(config.teamTz), config.publicUrl, config.shiftReminderWidgetEnabled) },
     // В тот же массив: чек-лист уходит с началом смены дежурного, а не по
     // общему часу, поэтому ему нужен тот же пятиминутный тик.
     { name: "checklist", run: () => runChecklistTick(db, bot, config, teamNow(config.teamTz)) },
@@ -94,6 +96,12 @@ const tickRound = createTickScheduler([
     { name: "food", run: () => runFoodTick(db, bot, teamNow(config.teamTz)) },
 ]);
 setInterval(tickRound, REMINDER_TICK_MS);
+
+// У короткого опроса к общему пятиминутному тику уже может истечь срок.
+const pollInviteRound = createTickScheduler([
+  { name: "telegram-poll-invites", run: () => retryTelegramPollInvites(bot, db, config.teamTz) },
+]);
+const pollInviteTimer = setInterval(pollInviteRound, 10_000);
 
 let flushPending: (() => Promise<void>) | undefined;
 const app = createApp({ db, config, bot, liveness, onFlushPending: (flush) => { flushPending = flush; } });
@@ -129,6 +137,7 @@ let shuttingDown = false;
 const shutdown = () => {
   if (shuttingDown) return;
   shuttingDown = true;
+  clearInterval(pollInviteTimer);
   void shutdownSafely({
     bot,
     closeHttp: () =>

@@ -5,6 +5,7 @@ import { safeErrorMessage } from "../util/safe-error";
 export interface KeepPollingDeps {
   bot: Pick<Bot, "api" | "start">;
   onStart(info: UserFromGetMe): void;
+  onPollSuccess?(): void;
   log(line: string): void;
   sleep(ms: number): Promise<void>;
   exit(code: number): void;
@@ -56,7 +57,12 @@ export async function keepPolling(deps: KeepPollingDeps): Promise<void> {
     const response = await prev(method, payload, signal);
     // grammY вызывает onStart до первого getUpdates: при постоянном 409
     // подготовка успешна, но сбрасывать счётчик ещё рано.
-    if (method === "getUpdates" && response.ok) failures = 0;
+    if (method === "getUpdates" && response.ok) {
+      failures = 0;
+      // grammY вызывает getUpdates и при bot.stop(), чтобы подтвердить offset.
+      // Этот короткий запрос не означает, что возобновился приём обновлений.
+      if ((payload as { timeout?: number }).timeout === POLL_TIMEOUT_S) deps.onPollSuccess?.();
+    }
     return response;
   });
   for (;;) {

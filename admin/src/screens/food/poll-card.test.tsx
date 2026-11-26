@@ -99,6 +99,18 @@ describe("консоль: карточка опроса", () => {
   });
 });
 
+it("организатор видит ожидающую, неопределённую и неудавшуюся доставку карточек", async () => {
+  const telegram = {
+    options: [{ text: "Парк", count: 0 }, { text: "Музей", count: 0 }],
+    multiple: false, myOptionIds: [], votedCount: 0, canVote: true,
+    delivery: { pending: ["Игорь"], unknown: ["Марк"], failed: ["Дима"] },
+  };
+  const el = await mount(PollCard, { poll: pollView({ telegram }) });
+  expect(el.textContent).toContain("Ожидают отправки: Игорь");
+  expect(el.textContent).toContain("Доставка не подтверждена: Марк");
+  expect(el.textContent).toContain("Не доставлены: Дима");
+});
+
 // Кнопка показывается ровно тогда, когда ручка её примет (`canRemindSilent`),
 // — иначе карточка обещала бы напоминание, которое не уйдёт.
 describe("консоль: «🔔 Напомнить молчащим»", () => {

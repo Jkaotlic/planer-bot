@@ -43,12 +43,60 @@ case "${KEEP}" in ''|*[!0-9]*) fail "PLANER_BACKUP_KEEP должно быть ч
 [ "${KEEP}" -ge 1 ] || fail "PLANER_BACKUP_KEEP должно быть не меньше 1"
 
 mkdir -p "${DEST}"
+# Плановый запуск и ручной делят каталог и ротацию. Дескриптор остаётся у shell
+# до выхода, а ядро снимает блокировку даже после аварийной остановки.
+exec 9>>"${DEST}/.planer-backup.lock"
+if command -v lockf >/dev/null 2>&1; then
+  lockf -s 9 || fail "не удалось заблокировать папку бэкапов"
+else
+  flock 9 || fail "не удалось заблокировать папку бэкапов"
+fi
 STAMP="$(date '+%Y%m%d-%H%M%S')"
 OUT="${DEST}/planer-${STAMP}.db"
+DOCS_OUT="${DEST}/planer-docs-${STAMP}.tar.gz"
+COMPLETE="${DEST}/planer-${STAMP}.complete"
+PENDING="${DEST}/.planer-${STAMP}.pending"
+STAGE="$(mktemp -d "${DEST}/.planer-backup.XXXXXX")"
+DOCS_PUBLISHED=0
+DB_PUBLISHED=0
+PENDING_PUBLISHED=0
+COMMITTED=0
+
+cleanup() {
+  # Удаляем только ссылки, которые успел создать этот запуск. Снимок другого
+  # процесса с тем же штампом остаётся на месте.
+  if [ "${COMMITTED}" -eq 0 ]; then
+    [ "${DB_PUBLISHED}" -eq 0 ] || rm -f "${OUT}"
+    [ "${DOCS_PUBLISHED}" -eq 0 ] || rm -f "${DOCS_OUT}"
+  fi
+  [ "${PENDING_PUBLISHED}" -eq 0 ] || rm -f "${PENDING}"
+  rm -rf "${STAGE}"
+}
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
+
+# Путь к боевой базе может быть относительным, а SQLite запускается в staging.
+case "${DB}" in /*) ;; *) DB="${PWD}/${DB}" ;; esac
+snapshot_sql() { (cd "${STAGE}" && "${SQLITE}" 'file:snapshot.db?immutable=1' "$@"); }
+
+# Сравниваем идентификатор чек-листа и имя файла. Абсолютный путь внутри
+# SQLite может указывать на другой каталог после восстановления.
+archive_has_snapshot_docs() {
+  local directory="$1" db_name="$2" listing="$3" count path suffix
+  count="$(cd "${directory}" && "${SQLITE}" -readonly "file:${db_name}?immutable=1" \
+    "SELECT count(*) FROM pragma_table_info('checklists') WHERE name='doc_path';")" || return 1
+  [ "${count}" = 1 ] || return 0
+  (cd "${directory}" && "${SQLITE}" -readonly "file:${db_name}?immutable=1" \
+    "SELECT doc_path FROM checklists WHERE doc_path <> '';" ) > "${STAGE}/doc-paths" || return 1
+  while IFS= read -r path; do
+    suffix="/$(basename "$(dirname "${path}")")/$(basename "${path}")"
+    awk -v suffix="${suffix}" 'substr($0, length($0) - length(suffix) + 1) == suffix { found = 1; exit } END { exit !found }' "${listing}" || return 1
+  done < "${STAGE}/doc-paths"
+}
 
 log "снимок ${DB} -> ${OUT}"
-"${SQLITE}" "${DB}" ".backup '${OUT}'" || fail "sqlite3 .backup не отработал"
-[ -s "${OUT}" ] || fail "снимок пустой: ${OUT}"
+(cd "${STAGE}" && "${SQLITE}" "${DB}" '.backup snapshot.db') || fail "sqlite3 .backup не отработал"
+[ -s "${STAGE}/snapshot.db" ] || fail "снимок пустой: ${OUT}"
 
 # A backup nobody checked is not a backup. Verify before it is allowed to count
 # towards retention — otherwise a run of corrupt snapshots would quietly evict the
@@ -59,53 +107,74 @@ log "снимок ${DB} -> ${OUT}"
 # needs a writable directory (it fails outright on a read-only volume) and litters
 # the backup folder with sidecars that look like part of the snapshot. immutable=1
 # promises the file won't change, so no sidecar is needed at all.
-INTEGRITY="$("${SQLITE}" "file:${OUT}?immutable=1" 'PRAGMA integrity_check;' 2>&1 || true)"
+INTEGRITY="$(snapshot_sql 'PRAGMA integrity_check;' 2>&1 || true)"
 if [ "${INTEGRITY}" != "ok" ]; then
-  rm -f "${OUT}"
   fail "снимок не прошёл integrity_check: ${INTEGRITY}"
 fi
 
-EMPLOYEES="$("${SQLITE}" "file:${OUT}?immutable=1" 'select count(*) from employees;')"
-SHIFTS="$("${SQLITE}" "file:${OUT}?immutable=1" 'select count(*) from shifts;')"
-log "ок: $(du -h "${OUT}" | cut -f1), сотрудников ${EMPLOYEES}, записей ${SHIFTS}"
+EMPLOYEES="$(snapshot_sql 'select count(*) from employees;')"
+SHIFTS="$(snapshot_sql 'select count(*) from shifts;')"
 
 # Файлы инструкций к чек-листам лежат НЕ в базе, и снимок .backup про них ничего
 # не знает: восстановление из одной базы дало бы чек-листы с именами файлов,
 # которых нет на диске. Архив кладётся рядом со снимком и с тем же штампом,
 # чтобы пара «база + файлы» читалась одним взглядом.
 DOCS="${PLANER_DOCS_DIR:-${REPO_ROOT}/data/checklist-docs}"
-if [ -d "${DOCS}" ]; then
-  DOCS_OUT="${DEST}/planer-docs-${STAMP}.tar.gz"
-  tar -czf "${DOCS_OUT}" -C "$(dirname "${DOCS}")" "$(basename "${DOCS}")" || fail "не удалось упаковать ${DOCS}"
-  log "файлы инструкций: $(du -h "${DOCS_OUT}" | cut -f1) -> ${DOCS_OUT}"
-else
-  log "каталог файлов инструкций пуст или не создан (${DOCS}) — архивировать нечего"
+DOCS_NAME="$(basename "${DOCS}")"
+DOCS_PARENT="$(dirname "${DOCS}")"
+if [ ! -d "${DOCS}" ]; then
+  # Даже без инструкций пустой архив делает комплект однозначным для меню.
+  mkdir "${STAGE}/${DOCS_NAME}"
+  DOCS_PARENT="${STAGE}"
 fi
+tar -czf "${STAGE}/docs.tar.gz" -C "${DOCS_PARENT}" "${DOCS_NAME}" || fail "не удалось упаковать ${DOCS}"
+gzip -t "${STAGE}/docs.tar.gz" || fail "контрольная сумма архива не совпала"
+tar -tzf "${STAGE}/docs.tar.gz" > "${STAGE}/archive.list" || fail "архив инструкций не читается"
 
-# Rotation. Sorted newest-first by name, which is the same as by time because the
-# stamp is fixed-width — no dependence on mtime, which a restore would rewrite.
+# Файл могли заменить между снимком SQLite и упаковкой. Такой архив читается,
+# но восстановленная инструкция будет ссылаться на отсутствующий файл.
+archive_has_snapshot_docs "${STAGE}" snapshot.db "${STAGE}/archive.list" || fail "архив не содержит инструкцию из снимка"
+
+# Жёсткие ссылки публикуют файлы на том же томе и не заменяют чужой комплект.
+# Pending отличает публикацию нового комплекта от старой пары без маркера.
+touch "${STAGE}/complete"
+ln "${STAGE}/complete" "${PENDING}" || fail "комплект с этим штампом уже публиковался"
+PENDING_PUBLISHED=1
+ln "${STAGE}/docs.tar.gz" "${DOCS_OUT}" || fail "архив с этим штампом уже существует"
+DOCS_PUBLISHED=1
+ln "${STAGE}/snapshot.db" "${OUT}" || fail "снимок с этим штампом уже существует"
+DB_PUBLISHED=1
+ln "${STAGE}/complete" "${COMPLETE}" || fail "не удалось отметить завершение комплекта"
+COMMITTED=1
+log "ок: $(du -h "${OUT}" | cut -f1), сотрудников ${EMPLOYEES}, записей ${SHIFTS}"
+log "файлы инструкций: $(du -h "${DOCS_OUT}" | cut -f1) -> ${DOCS_OUT}"
+
+# Ротируем пары по штампу. Старые копии без маркера учитываются, если архив
+# читается. Незавершённый комплект не вытесняет последний исправный.
 REMOVED=0
+KEPT=0
 while IFS= read -r old; do
   [ -n "$old" ] || continue
-  rm -f "${DEST}/$old"
+  stamp="${old#planer-}"
+  stamp="${stamp%.db}"
+  archive="${DEST}/planer-docs-${stamp}.tar.gz"
+  marker="${DEST}/planer-${stamp}.complete"
+  [ -s "${DEST}/${old}" ] && [ -s "${archive}" ] || continue
+  if [ ! -f "${marker}" ]; then
+    [ ! -e "${DEST}/.planer-${stamp}.pending" ] || continue
+    [ "$(cd "${DEST}" && "${SQLITE}" -readonly "file:${old}?immutable=1" 'PRAGMA quick_check;' 2>/dev/null)" = ok ] || continue
+    gzip -t "${archive}" > /dev/null 2>&1 || continue
+    tar -tzf "${archive}" > "${STAGE}/legacy.list" 2>/dev/null || continue
+    archive_has_snapshot_docs "${DEST}" "${old}" "${STAGE}/legacy.list" || continue
+  fi
+  if [ "${KEPT}" -lt "${KEEP}" ]; then
+    KEPT=$((KEPT + 1))
+    continue
+  fi
+  rm -f "${DEST}/${old}" "${archive}" "${marker}"
   REMOVED=$((REMOVED + 1))
 done <<EOF
-$(ls -1 "${DEST}" | grep -E '^planer-[0-9]{8}-[0-9]{6}\.db$' | sort -r | tail -n +$((KEEP + 1)))
+$(ls -1 "${DEST}" | grep -E '^planer-[0-9]{8}-[0-9]{6}\.db$' | sort -r)
 EOF
 
-KEPT="$(ls -1 "${DEST}" | grep -cE '^planer-[0-9]{8}-[0-9]{6}\.db$' || true)"
-log "хранится снимков: ${KEPT} (лимит ${KEEP}), удалено в этот раз: ${REMOVED}"
-
-# Та же ротация для архивов файлов — своим проходом, а не общим: имена разные, и
-# один список смешал бы базы с архивами, отчего лимит считался бы вдвое.
-DOCS_REMOVED=0
-while IFS= read -r old; do
-  [ -n "$old" ] || continue
-  rm -f "${DEST}/$old"
-  DOCS_REMOVED=$((DOCS_REMOVED + 1))
-done <<EOF
-$(ls -1 "${DEST}" | grep -E '^planer-docs-[0-9]{8}-[0-9]{6}\.tar\.gz$' | sort -r | tail -n +$((KEEP + 1)))
-EOF
-
-DOCS_KEPT="$(ls -1 "${DEST}" | grep -cE '^planer-docs-[0-9]{8}-[0-9]{6}\.tar\.gz$' || true)"
-log "хранится архивов файлов: ${DOCS_KEPT} (лимит ${KEEP}), удалено в этот раз: ${DOCS_REMOVED}"
+log "хранится комплектов: ${KEPT} (лимит ${KEEP}), удалено в этот раз: ${REMOVED}"

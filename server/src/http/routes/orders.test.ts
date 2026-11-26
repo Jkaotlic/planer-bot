@@ -55,6 +55,34 @@ const send = (token: string, body: unknown, method = "POST") => ({
 });
 const get = (token: string) => ({ headers: { Authorization: `Bearer ${token}` } });
 
+function delayedOrderEdit(app: ReturnType<typeof createApp>, path: string, token: string, body: unknown, method: string) {
+  const init = send(token, body, method);
+  const request = new Request(`http://x${path}`, {
+    ...init,
+    headers: { ...init.headers, "content-length": String(Buffer.byteLength(init.body)) },
+  });
+  // Подмена только задержки чтения тела. Обе ручки и SQLite остаются настоящими.
+  const text = request.text.bind(request);
+  let bodyRead!: () => void;
+  let release!: () => void;
+  const started = new Promise<void>((resolve) => { bodyRead = resolve; });
+  const unblocked = new Promise<void>((resolve) => { release = resolve; });
+  request.text = async () => {
+    bodyRead();
+    await unblocked;
+    return text();
+  };
+  const result = Promise.resolve(app.request(request));
+  return {
+    started: Promise.race([
+      started,
+      result.then((res) => { throw new Error(`Правка завершилась до чтения тела: ${res.status}`); }),
+    ]),
+    result,
+    release,
+  };
+}
+
 function person(db: Db, name: string, tg: number): number {
   const e = createEmployee(db, { displayName: name, inviteToken: `inv-${name}` });
   linkTelegramAccount(db, `inv-${name}`, tg);
@@ -151,6 +179,51 @@ describe("заказы по HTTP", () => {
     expect(bad.status).toBe(400);
   });
 
+  it.each(["POST", "PATCH"])("не сохраняет %s позиции, если сбор закрыли пока читалось тело", async (method) => {
+    const { app, sent, igor, anyaT, igorT, placeId } = await stage();
+    const { body } = await newOrder(app, anyaT, igor, placeId);
+    const path = `/api/orders/${body.order.id}`;
+    const added = await app.request(`${path}/items`, send(igorT, { name: "Чай", price: 120 }));
+    const itemId = (await added.json()).order.myItems[0].id;
+    const delayed = method === "POST"
+      ? delayedOrderEdit(app, `${path}/items`, igorT, { name: "Суп", price: 180 }, method)
+      : delayedOrderEdit(app, `${path}/items/${itemId}`, igorT, { qty: 3 }, method);
+
+    try {
+      await delayed.started;
+      const closed = await app.request(`${path}/close`, send(anyaT, {}));
+      expect(closed.status).toBe(200);
+      expect((await closed.json()).order).toMatchObject({ closed: true, total: 120 });
+    } finally {
+      delayed.release();
+    }
+
+    expect((await delayed.result).status).toBe(409);
+    const fresh = await app.request(path, get(igorT));
+    expect((await fresh.json()).order).toMatchObject({ closed: true, myItems: [{ name: "Чай", qty: 1 }], total: 120 });
+    expect(sent.some((message) => message.to === 101 && message.text.includes("Сдай 120 ₽"))).toBe(true);
+  });
+
+  it("отклоняет правку позиции, если срок истёк пока читалось тело, даже до тика закрытия", async () => {
+    const { app, igor, anyaT, igorT, placeId } = await stage();
+    const { body } = await newOrder(app, anyaT, igor, placeId);
+    const path = `/api/orders/${body.order.id}`;
+    const added = await app.request(`${path}/items`, send(igorT, { name: "Чай", price: 120 }));
+    const itemId = (await added.json()).order.myItems[0].id;
+    const delayed = delayedOrderEdit(app, `${path}/items/${itemId}`, igorT, { qty: 3 }, "PATCH");
+
+    try {
+      await delayed.started;
+      vi.setSystemTime(new Date("2026-09-29T09:30:00Z"));
+    } finally {
+      delayed.release();
+    }
+
+    expect((await delayed.result).status).toBe(409);
+    const fresh = await app.request(path, get(igorT));
+    expect((await fresh.json()).order).toMatchObject({ open: false, closed: false, total: 120 });
+  });
+
   it("посторонний — 404 на чтение и на заказ, с русской причиной: мини-апп показывает её как есть", async () => {
     const { app, igor, anyaT, markT, placeId } = await stage();
     const { body } = await newOrder(app, anyaT, igor, placeId);
@@ -171,6 +244,18 @@ describe("заказы по HTTP", () => {
     const other = await app.request(new Request(`http://x/api/orders/${body.order.id}/payments/${igor}`, send(anyaT, {})));
     expect(other.status).toBe(400);
     expect((await other.json()).error).toBe("Не понял отметку.");
+  });
+
+  it.each(["paid", "payments"])("отклоняет JSON null в /%s", async (kind) => {
+    const { app, igor, anyaT, igorT, placeId } = await stage();
+    const { body } = await newOrder(app, anyaT, igor, placeId);
+    const path = kind === "paid" ? "paid" : `payments/${igor}`;
+    const token = kind === "paid" ? igorT : anyaT;
+
+    const response = await app.request(`/api/orders/${body.order.id}/${path}`, send(token, null));
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toBe("Не понял отметку.");
   });
 
   it("закрытие запускающим рассылает сводку и «сдай»; участнику — 409", async () => {

@@ -45,6 +45,13 @@ export interface TelegramPollView {
   myOptionIds: number[];
   votedCount: number;
   canVote: boolean;
+  delivery?: TelegramPollDeliveryView;
+}
+
+export interface TelegramPollDeliveryView {
+  pending: string[];
+  unknown: string[];
+  failed: string[];
 }
 
 /** Место с меню — общее для всей команды, как и опрос. */

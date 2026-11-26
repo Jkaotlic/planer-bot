@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import type { Bot } from "grammy";
 import { z } from "zod";
 import {
@@ -61,11 +61,11 @@ export function createOrderRoutes(deps: { db: Db; config: Config; bot?: Bot }): 
   const viewerOf = (c: { get(k: "auth"): { employeeId: number; isAdmin: boolean } }) => ({ id: c.get("auth").employeeId, isAdmin: c.get("auth").isAdmin });
 
   /** Заказ, который смотрящий вправе видеть, — или null (→ 404). */
-  function visible(c: Parameters<typeof viewerOf>[0] & { req: { param(k: string): string } }) {
-    const order = getOrder(db, Number(c.req.param("id")));
+  function visible(c: Context<Env>, connection: Db = db) {
+    const order = getOrder(connection, Number(c.req.param("id")));
     const viewer = viewerOf(c);
     const now = teamNow(config.teamTz);
-    return order && orderView(db, order, viewer, now) ? { order, viewer, now } : null;
+    return order && orderView(connection, order, viewer, now) ? { order, viewer, now } : null;
   }
 
   /**
@@ -76,6 +76,19 @@ export function createOrderRoutes(deps: { db: Db; config: Config; bot?: Bot }): 
   function afterOwnEdit(c: { json(body: unknown): Response }, v: NonNullable<ReturnType<typeof visible>>) {
     if (bot) void redrawOrderMessage(bot, db, v.order, v.viewer.id, v.now, config.publicUrl);
     return c.json({ order: orderView(db, v.order, v.viewer, v.now) });
+  }
+
+  function editOwnItem(
+    c: Context<Env>,
+    edit: (tx: Db, current: NonNullable<ReturnType<typeof visible>>) => Response | undefined,
+  ): Response {
+    // Тело уже прочитано. Закрытие или дедлайн могли наступить за это время.
+    const result = db.transaction((tx) => {
+      const current = visible(c, tx);
+      if (!current) return c.json({ error: NOT_FOUND }, 404);
+      return edit(tx, current) ?? current;
+    });
+    return result instanceof Response ? result : afterOwnEdit(c, result);
   }
 
   app.get("/api/orders", auth, (c) => c.json({ orders: listOrdersFor(db, viewerOf(c), teamNow(config.teamTz)) }));
@@ -152,32 +165,33 @@ export function createOrderRoutes(deps: { db: Db; config: Config; bot?: Bot }): 
   });
 
   app.post("/api/orders/:id/items", auth, async (c) => {
-    const v = visible(c);
-    if (!v) return c.json({ error: NOT_FOUND }, 404);
     const parsed = orderItemInputSchema.safeParse(await jsonBody(c));
-    if (!parsed.success) return c.json({ error: "Проверь блюдо и цену (целые рубли, до 100 000).", issues: parsed.error.issues }, 400);
-    const input = parsed.data;
-    const result = "menuItemId" in input
-      ? addMenuItem(db, v.order, v.viewer.id, input.menuItemId, v.now)
-      : addCustomItem(db, v.order, v.viewer.id, input, v.now);
-    if (!result.ok) return c.json({ error: result.error }, 409);
-    return afterOwnEdit(c, v);
+    return editOwnItem(c, (tx, current) => {
+      if (!parsed.success) return c.json({ error: "Проверь блюдо и цену (целые рубли, до 100 000).", issues: parsed.error.issues }, 400);
+      const { order, viewer, now } = current;
+      const input = parsed.data;
+      const result = "menuItemId" in input
+        ? addMenuItem(tx, order, viewer.id, input.menuItemId, now)
+        : addCustomItem(tx, order, viewer.id, input, now);
+      if (!result.ok) return c.json({ error: result.error }, 409);
+    });
   });
 
   app.patch("/api/orders/:id/items/:itemId", auth, async (c) => {
-    const v = visible(c);
-    if (!v) return c.json({ error: NOT_FOUND }, 404);
-    const body = (await jsonBody(c)) as { qty?: unknown };
-    if (!Number.isInteger(body.qty) || (body.qty as number) < 1) return c.json({ error: `Количество — от 1 до ${FOOD_QTY_MAX}.` }, 400);
-    if ((body.qty as number) > FOOD_QTY_MAX) {
-      // Тот же текст, что у тапа в боте (у кг — вес). Единицу берём только у своей
-      // позиции: чужая всё равно получит отказ, и раскрывать её незачем.
-      const own = itemsOf(db, v.order.id).find((i) => i.id === Number(c.req.param("itemId")) && i.employeeId === v.viewer.id);
-      return c.json({ error: qtyLimitText(own ?? {}) }, 400);
-    }
-    const result = setItemQty(db, v.order, v.viewer.id, Number(c.req.param("itemId")), body.qty as number, v.now);
-    if (!result.ok) return c.json({ error: result.error }, 409);
-    return afterOwnEdit(c, v);
+    const { qty } = await jsonBody(c);
+    const itemId = Number(c.req.param("itemId"));
+    return editOwnItem(c, (tx, { order, viewer, now }) => {
+      if (typeof qty !== "number" || !Number.isInteger(qty) || qty < 1) {
+        return c.json({ error: `Количество — от 1 до ${FOOD_QTY_MAX}.` }, 400);
+      }
+      if (qty > FOOD_QTY_MAX) {
+        // У кг — вес, у штук — штуки. Единицу чужой позиции не раскрываем.
+        const own = itemsOf(tx, order.id).find((item) => item.id === itemId && item.employeeId === viewer.id);
+        return c.json({ error: qtyLimitText(own ?? {}) }, 400);
+      }
+      const result = setItemQty(tx, order, viewer.id, itemId, qty, now);
+      if (!result.ok) return c.json({ error: result.error }, 409);
+    });
   });
 
   app.delete("/api/orders/:id/items/:itemId", auth, (c) => {
@@ -197,9 +211,9 @@ export function createOrderRoutes(deps: { db: Db; config: Config; bot?: Bot }): 
   });
 
   app.post("/api/orders/:id/paid", auth, async (c) => {
+    const body = await jsonBody(c);
     const v = visible(c);
     if (!v) return c.json({ error: NOT_FOUND }, 404);
-    const body = (await c.req.json().catch(() => ({}))) as { paid?: unknown };
     if (typeof body.paid !== "boolean") return c.json({ error: "Не понял отметку." }, 400);
     const result = setOrderPaid(db, v.order, v.viewer.id, v.viewer, body.paid);
     if (!result.ok) return c.json({ error: result.error }, 409);
@@ -208,9 +222,9 @@ export function createOrderRoutes(deps: { db: Db; config: Config; bot?: Bot }): 
 
   /** Галочка за другого: обед часто сдают наличкой в руки. */
   app.post("/api/orders/:id/payments/:employeeId", auth, async (c) => {
+    const body = await jsonBody(c);
     const v = visible(c);
     if (!v) return c.json({ error: NOT_FOUND }, 404);
-    const body = (await c.req.json().catch(() => ({}))) as { paid?: unknown };
     if (typeof body.paid !== "boolean") return c.json({ error: "Не понял отметку." }, 400);
     const payerId = Number(c.req.param("employeeId"));
     if (!Number.isInteger(payerId)) return c.json({ error: "Не тот человек." }, 400);

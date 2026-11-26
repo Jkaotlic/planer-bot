@@ -13,6 +13,7 @@ import { securityHeaders } from "./security-headers";
 import { rateLimiter, teamRateLimiter } from "./rate-limit";
 import { describeClientError, CLIENT_ERROR_BODY_MAX, type ClientErrorReport } from "./client-error";
 import { apiBodyLimit, readTextCapped } from "./body-limits";
+import { jsonBody, jsonObjectBody } from "./json-body";
 import { redactSecrets } from "../util/safe-error";
 import { listActiveTemplates, getTemplate, setCoverage, setReminder } from "../repo/templates";
 import { checklistIdsByTemplate, getChecklist, setTemplatesChecklists } from "../repo/checklists";
@@ -22,7 +23,7 @@ import { listCalendarDays, loadCalendar, setManualDay } from "../repo/calendar-d
 import { refreshHolidays } from "../holidays/holiday-tick";
 import { xmlcalendarFetcher, type FetchYear } from "../holidays/xmlcalendar";
 import { acknowledgedCoverageDates, holidaysState, isHolidaysAuto, setHolidaysAuto } from "../repo/settings";
-import type { Shift, SwapRequest } from "../db/schema";
+import { auditLog, type Shift, type SwapRequest } from "../db/schema";
 import {
   getByTelegramId,
   getEmployeeById,
@@ -380,6 +381,10 @@ export function createApp(deps: AppDeps): Hono<Env> {
     if (link && !link.reachable) {
       return c.json({ ok: false, bot: "unreachable", since: link.since.toISOString() }, 503);
     }
+    const polling = deps.liveness?.pollingStatus();
+    if (polling && !polling.fresh) {
+      return c.json({ ok: false, bot: "polling_stale", since: polling.since.toISOString() }, 503);
+    }
     return c.json({ ok: true });
   });
 
@@ -582,17 +587,10 @@ export function createApp(deps: AppDeps): Hono<Env> {
     });
   });
 
-  /** The settings a worker owns about themselves. Scoped to the caller by the
-   *  token: there is no employee id in the path, so nobody can touch anybody else.
-   *  A patch, not a form — the two fields live on different screens and are saved
-   *  by different gestures, so either may arrive alone. */
+  /** Настройки привязаны к токену работника. Поля приходят по одному с разных
+   *  экранов или вместе. В обоих случаях весь запрос проверяется до записи. */
   app.patch("/api/me/settings", requireAuth(db, config.jwtSecret), async (c) => {
-    const body = (await c.req.json().catch(() => ({}))) as {
-      remindersEnabled?: unknown;
-      preferredName?: unknown;
-      selfScheduleEnabled?: unknown;
-      startTab?: unknown;
-    };
+    const body = await jsonBody(c);
     const hasReminders = body.remindersEnabled !== undefined;
     const hasPreferred = body.preferredName !== undefined;
     const hasSelfSchedule = body.selfScheduleEnabled !== undefined;
@@ -616,50 +614,40 @@ export function createApp(deps: AppDeps): Hono<Env> {
     }
 
     const id = c.get("auth").employeeId;
-    let employee = getEmployeeById(db, id);
-    if (!employee) return c.json({ error: "not_found" }, 404);
-    const before = employee;
-    if (hasSelfSchedule) {
-      // Не 400: поле существует и понято — его просто некому применить.
-      // Иначе тумблер стал бы способом обойти роль.
-      if (!employee.isObserver) return c.json({ error: "forbidden" }, 403);
-      employee = setSelfScheduleEnabled(db, id, body.selfScheduleEnabled as boolean) ?? employee;
-    }
-    if (hasStartTab) {
-      // Не 400: вкладка существует и понята — её просто некому показать. Иначе
-      // настройка стала бы способом обойти роль, как и тумблер самозаписи выше.
-      if (body.startTab !== null && !startTabVisible(body.startTab as StartTab, {
-        isAdmin: c.get("auth").isAdmin,
-        isObserver: employee.isObserver,
-      })) {
+    return db.transaction((tx) => {
+      const before = getEmployeeById(tx, id);
+      if (!before) return c.json({ error: "not_found" }, 404);
+      // Проверяем все права до первой записи: одна форма может прислать несколько полей.
+      if (hasSelfSchedule && !before.isObserver) return c.json({ error: "forbidden" }, 403);
+      if (hasStartTab && body.startTab !== null && !startTabVisible(body.startTab as StartTab, before)) {
         return c.json({ error: "forbidden" }, 403);
       }
-      employee = setStartTab(db, id, body.startTab as string | null) ?? employee;
-    }
-    if (hasReminders) employee = setRemindersEnabled(db, id, body.remindersEnabled as boolean) ?? employee;
-    if (preferred?.ok) employee = setPreferredName(db, id, preferred.value) ?? employee;
 
-    // Одно действие человека — одна строка журнала: маршрут принимает несколько
-    // полей разом, и делить его на несколько событий значило бы врать о том,
-    // что он сделал.
-    // Только то, что правда поменялось: повтор того же значения — не событие,
-    // и строка «изменил настройки» без изменений лишь засоряла журнал.
-    // Вкладка старта раньше не писалась вовсе.
-    const changed = {
-      ...(hasReminders && employee.remindersEnabled !== before.remindersEnabled ? { remindersEnabled: employee.remindersEnabled } : {}),
-      ...(preferred?.ok && employee.preferredName !== before.preferredName ? { preferredName: employee.preferredName } : {}),
-      ...(hasSelfSchedule && employee.selfScheduleEnabled !== before.selfScheduleEnabled ? { selfScheduleEnabled: employee.selfScheduleEnabled } : {}),
-      ...(hasStartTab && employee.startTab !== before.startTab ? { startTab: employee.startTab } : {}),
-    };
-    if (Object.keys(changed).length > 0) {
-      recordAudit(db, "settings_changed", id, { employeeId: id, displayName: employee.displayName, ...changed });
-    }
+      let employee = before;
+      if (hasSelfSchedule) employee = setSelfScheduleEnabled(tx, id, body.selfScheduleEnabled as boolean) ?? employee;
+      if (hasStartTab) employee = setStartTab(tx, id, body.startTab as string | null) ?? employee;
+      if (hasReminders) employee = setRemindersEnabled(tx, id, body.remindersEnabled as boolean) ?? employee;
+      if (preferred?.ok) employee = setPreferredName(tx, id, preferred.value) ?? employee;
 
-    return c.json({
-      remindersEnabled: employee.remindersEnabled,
-      preferredName: employee.preferredName,
-      // Returned so the greeting can update without a second round trip.
-      address: addressOf(employee),
+      const changed = {
+        ...(hasReminders && employee.remindersEnabled !== before.remindersEnabled ? { remindersEnabled: employee.remindersEnabled } : {}),
+        ...(preferred?.ok && employee.preferredName !== before.preferredName ? { preferredName: employee.preferredName } : {}),
+        ...(hasSelfSchedule && employee.selfScheduleEnabled !== before.selfScheduleEnabled ? { selfScheduleEnabled: employee.selfScheduleEnabled } : {}),
+        ...(hasStartTab && employee.startTab !== before.startTab ? { startTab: employee.startTab } : {}),
+      };
+      if (Object.keys(changed).length > 0) {
+        // Вся форма — одно событие. Если его не удалось записать, откатываем и настройки.
+        tx.insert(auditLog).values({
+          type: "settings_changed", actorEmployeeId: id, payload: { employeeId: id, displayName: employee.displayName, ...changed },
+        }).run();
+      }
+
+      return c.json({
+        remindersEnabled: employee.remindersEnabled,
+        preferredName: employee.preferredName,
+        // Returned so the greeting can update without a second round trip.
+        address: addressOf(employee),
+      });
     });
   });
 
@@ -677,7 +665,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
    * докладывает этот маршрут, в одном месте.
    */
   app.post("/api/announcements", requireAnnouncer(db, config.jwtSecret), async (c) => {
-    const body = (await c.req.json().catch(() => ({}))) as { text?: unknown; audience?: unknown };
+    const body = await jsonBody(c);
     const text = typeof body.text === "string" ? body.text.trim() : "";
     if (!text) return c.json({ error: "Текст объявления пустой" }, 400);
     if (text.length > ANNOUNCEMENT_TEXT_MAX) {
@@ -767,7 +755,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
   });
 
   app.patch("/api/me/notifications", requireAdmin(db, config.jwtSecret), async (c) => {
-    const body = (await c.req.json().catch(() => ({}))) as { kind?: unknown; enabled?: unknown };
+    const body = await jsonBody(c);
     if (typeof body.enabled !== "boolean") return c.json({ error: "enabled должен быть true или false" }, 400);
     // Проверяем по списку, а не по типу: тело приходит из сети, и `as AdminNoticeKind`
     // завёл бы строку с любым мусором в `kind`.
@@ -846,7 +834,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
    * всех, иначе консоль разрешит то, что сервер отвергнет.
    */
   app.put("/api/admin/settings/reminder-hour", requireAdmin(db, config.jwtSecret), async (c) => {
-    const body = (await c.req.json().catch(() => ({}))) as { hour?: unknown };
+    const body = await jsonBody(c);
     if (typeof body.hour !== "string") return c.json({ error: "Час нужен строкой вида ЧЧ:ММ" }, 400);
     try {
       validateReminderHour(body.hour);
@@ -868,7 +856,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
    * codebase that came from writing a status guard *after* a loop of awaits.
    */
   app.put("/api/admin/settings/swaps-lock", requireAdmin(db, config.jwtSecret), async (c) => {
-    const body = (await c.req.json().catch(() => ({}))) as { locked?: unknown };
+    const body = await jsonBody(c);
     if (typeof body.locked !== "boolean") return c.json({ error: "locked должен быть true или false" }, 400);
 
     // То же значение — ничего не произошло: без этой проверки двойной тап или
@@ -901,7 +889,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
    * а не про уборку.
    */
   app.put("/api/admin/settings/holidays-auto", requireAdmin(db, config.jwtSecret), async (c) => {
-    const body = (await c.req.json().catch(() => ({}))) as { enabled?: unknown };
+    const body = await jsonBody(c);
     if (typeof body.enabled !== "boolean") return c.json({ error: "enabled должен быть true или false" }, 400);
     const actorId = c.get("auth").employeeId;
     setHolidaysAuto(db, body.enabled, actorId);
@@ -940,7 +928,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.put("/api/admin/calendar/:date", requireAdmin(db, config.jwtSecret), async (c) => {
     const date = c.req.param("date");
     if (!dateStr.safeParse(date).success) return c.json({ error: "Дата должна быть в виде ГГГГ-ММ-ДД" }, 400);
-    const body = (await c.req.json().catch(() => ({}))) as { kind?: unknown; note?: unknown };
+    const body = await jsonBody(c);
     if (body.kind !== null && body.kind !== "holiday" && body.kind !== "workday") {
       return c.json({ error: "kind должен быть holiday, workday или null" }, 400);
     }
@@ -1011,15 +999,16 @@ export function createApp(deps: AppDeps): Hono<Env> {
     const employeeId = Number(c.req.param("id"));
     if (employeeId === c.get("auth").employeeId) return c.json({ error: "not_found" }, 404);
 
-    const rawBody = await c.req.json().catch(() => ({}));
+    const body = await jsonObjectBody(c);
+    if (!body) return c.json({ error: "Тело запроса должно быть объектом JSON" }, 400);
     // Тумблер «включить автоотправку обратно» шлёт этот флаг, а не готовую
     // дату: раньше дату вычислял браузер (`autoSendDateFor(celebratedOn,
     // today)` с клиентскими часами), и админ в другом часовом поясе ставил
     // автоотправку по чужому «сегодня». Дату теперь всегда считает сервер —
     // тем же `asOf`, что и вся эта ручка (командная дата, а не браузерная).
-    const armAutoSend = typeof rawBody === "object" && rawBody !== null && (rawBody as { armAutoSend?: unknown }).armAutoSend === true;
+    const armAutoSend = body.armAutoSend === true;
 
-    const parsed = parseCollectionBody(rawBody, { requireTitle: false });
+    const parsed = parseCollectionBody(body, { requireTitle: false });
     if (!parsed.ok) return c.json({ error: parsed.error }, 400);
     // A birthday round has no subject to edit — it is named after the person.
     if (parsed.value.title !== undefined || parsed.value.employeeId !== undefined) {
@@ -1183,7 +1172,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
   });
 
   app.post("/api/admin/collections/:id/send", requireAdmin(db, config.jwtSecret), async (c) => {
-    const body = (await c.req.json().catch(() => ({}))) as { confirm?: unknown };
+    const body = await jsonBody(c);
     if (body.confirm !== true) return c.json({ error: "нужно подтверждение: confirm: true" }, 400);
     const collection = readableCollection(db, Number(c.req.param("id")), c.get("auth").employeeId);
     if (!collection) return c.json({ error: "not_found" }, 404);
@@ -1232,7 +1221,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
    * это письмо уходит забывшим, и виновник в получатели не входит никогда.
    */
   app.post("/api/admin/collections/:id/remind-unpaid", requireAdmin(db, config.jwtSecret), async (c) => {
-    const body = (await c.req.json().catch(() => ({}))) as { confirm?: unknown };
+    const body = await jsonBody(c);
     if (body.confirm !== true) return c.json({ error: "нужно подтверждение: confirm: true" }, 400);
     const collection = readableCollection(db, Number(c.req.param("id")), c.get("auth").employeeId);
     if (!collection) return c.json({ error: "not_found" }, 404);
@@ -1273,7 +1262,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.post("/api/admin/collections/:id/close", requireAdmin(db, config.jwtSecret), async (c) => {
     const collection = readableCollection(db, Number(c.req.param("id")), c.get("auth").employeeId);
     if (!collection) return c.json({ error: "not_found" }, 404);
-    const body = (await c.req.json().catch(() => ({}))) as { closed?: unknown };
+    const body = await jsonBody(c);
     if (typeof body.closed !== "boolean") return c.json({ error: "closed должен быть true или false" }, 400);
 
     const updated = setCollectionClosed(db, collection.id, body.closed, new Date());
@@ -1298,7 +1287,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.post("/api/admin/collections/:id/payments/:employeeId", requireAdmin(db, config.jwtSecret), async (c) => {
     const collection = readableCollection(db, Number(c.req.param("id")), c.get("auth").employeeId);
     if (!collection) return c.json({ error: "not_found" }, 404);
-    const body = (await c.req.json().catch(() => ({}))) as { paid?: unknown };
+    const body = await jsonBody(c);
     if (typeof body.paid !== "boolean") return c.json({ error: "paid должен быть true или false" }, 400);
 
     const payerId = Number(c.req.param("employeeId"));
@@ -1414,7 +1403,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
    * задвоил бы событие.
    */
   app.post("/api/admin/bug-reports/:id/resolve", requireAdmin(db, config.jwtSecret), async (c) => {
-    const body = (await c.req.json().catch(() => ({}))) as { resolved?: unknown };
+    const body = await jsonBody(c);
     if (typeof body.resolved !== "boolean") {
       return c.json({ error: "resolved должен быть true или false" }, 400);
     }
@@ -2122,7 +2111,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
   };
 
   app.post("/api/swaps", requireAuth(db, config.jwtSecret), async (c) => {
-    const body = (await c.req.json().catch(() => ({}))) as { fromShiftId?: number; toShiftId?: number; message?: string };
+    const body = await jsonBody(c);
     if (typeof body.fromShiftId !== "number" || typeof body.toShiftId !== "number") return c.json({ error: "fromShiftId and toShiftId required" }, 400);
     if (body.message !== undefined && (typeof body.message !== "string" || body.message.length > SWAP_MESSAGE_MAX)) return c.json({ error: "invalid_message" }, 400);
     const res = createSwap(
@@ -2358,7 +2347,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.put("/api/admin/templates/:id/coverage", requireAdmin(db, config.jwtSecret), async (c) => {
     const templateId = Number(c.req.param("id"));
     if (!listActiveTemplates(db).some((item) => item.id === templateId)) return c.json({ error: "not_found" }, 404);
-    const body = (await c.req.json().catch(() => ({}))) as { coverage?: unknown };
+    const body = await jsonBody(c);
     if (!Array.isArray(body.coverage)) return c.json({ error: "coverage должен быть массивом из 7 чисел (Пн..Вс)" }, 400);
     let coverage: string;
     try {
@@ -2409,7 +2398,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.put("/api/admin/templates/:id/rotation", requireAdmin(db, config.jwtSecret), async (c) => {
     const templateId = Number(c.req.param("id"));
     if (!listActiveTemplates(db).some((item) => item.id === templateId)) return c.json({ error: "not_found" }, 404);
-    const body = (await c.req.json().catch(() => ({}))) as { rotationUnit?: unknown };
+    const body = await jsonBody(c);
     if (body.rotationUnit !== "day" && body.rotationUnit !== "week") {
       return c.json({ error: "rotationUnit must be «day» or «week»" }, 400);
     }
@@ -2425,7 +2414,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
     if (!listActiveTemplates(db).some((template) => template.id === templateId)) {
       return c.json({ error: "not_found" }, 404);
     }
-    const body = (await c.req.json().catch(() => ({}))) as { pool?: unknown; preference?: unknown };
+    const body = await jsonBody(c);
     if (!Array.isArray(body.pool) || body.pool.some((id) => !Number.isInteger(id))) {
       return c.json({ error: "pool must be an array of employee ids" }, 400);
     }
@@ -2572,7 +2561,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
    * (где он виновник) он не видит нигде, и отметка в нём выдала бы сюрприз.
    */
   app.post("/api/collections/:id/paid", requireAuth(db, config.jwtSecret), async (c) => {
-    const body = (await c.req.json().catch(() => ({}))) as { paid?: unknown };
+    const body = await jsonBody(c);
     if (typeof body.paid !== "boolean") return c.json({ error: "paid должен быть true или false" }, 400);
 
     const me = c.get("auth").employeeId;
@@ -2595,9 +2584,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
   // Admin: post a new vacant slot
   app.post("/api/admin/weekend/slots", requireAdmin(db, config.jwtSecret), async (c) => {
-    const body = (await c.req.json().catch(() => ({}))) as {
-      date?: unknown; start?: unknown; end?: unknown; title?: unknown; location?: unknown; note?: unknown;
-    };
+    const body = await jsonBody(c);
     if (typeof body.date !== "string" || typeof body.start !== "string" || typeof body.end !== "string") {
       return c.json({ error: "date, start and end are required" }, 400);
     }
@@ -2707,7 +2694,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
   // Admin: assign a slot to an interested worker -> creates an offered assignment
   app.post("/api/admin/weekend/slots/:id/assign", requireAdmin(db, config.jwtSecret), async (c) => {
-    const body = (await c.req.json().catch(() => ({}))) as { employeeId?: unknown };
+    const body = await jsonBody(c);
     if (typeof body.employeeId !== "number") return c.json({ error: "employeeId is required" }, 400);
     const res = assignSlot(db, Number(c.req.param("id")), body.employeeId, teamNow(config.teamTz).date);
     if (!res.ok) {
@@ -2869,7 +2856,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
   // Admin: parse and validate an uploaded roster without mutating the database.
   app.post("/api/admin/roster/import/preview", requireAdmin(db, config.jwtSecret), async (c) => {
-    const body = (await c.req.json().catch(() => ({}))) as { csv?: unknown };
+    const body = await jsonBody(c);
     const result = decodeUploadedRoster(body.csv);
     if (!result.ok) return c.json(result.body, result.status);
     const from = result.parsed.dates[0]!;
@@ -2897,7 +2884,7 @@ export function createApp(deps: AppDeps): Hono<Env> {
 
   // Admin: decode the same file again and apply the explicitly confirmed person map in one transaction.
   app.post("/api/admin/roster/import/apply", requireAdmin(db, config.jwtSecret), async (c) => {
-    const body = (await c.req.json().catch(() => ({}))) as { csv?: unknown; resolutions?: unknown; overwrite?: unknown };
+    const body = await jsonBody(c);
     const result = decodeUploadedRoster(body.csv);
     if (!result.ok) return c.json(result.body, result.status);
     if (!Array.isArray(body.resolutions)) return c.json({ error: "resolutions are required" }, 400);

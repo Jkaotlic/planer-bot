@@ -28,19 +28,21 @@ function stagePoll() {
   return { db, poll, anya, igor, mark };
 }
 
+const now = { date: "2026-09-29", time: "12:00" };
+
 describe("доставка после закрытия", () => {
   it("откатывает закрытие и аудит, если не удалось сохранить задания на отправку", () => {
     const { db, poll, anya } = stagePoll();
     db.run(sql`CREATE TEMP TRIGGER fail_close_queue BEFORE INSERT ON food_close_messages
       BEGIN SELECT RAISE(ABORT, 'queue test failure'); END`);
-    expect(() => closePollWithMessages(db, poll, anya, "closed")).toThrow();
+    expect(() => closePollWithMessages(db, poll, anya, "closed", now)).toThrow();
     expect(getPoll(db, poll.id)?.closedAt).toBeNull();
     expect(listRecentAudit(db, 10).some(row => row.type === "poll_closed")).toBe(false);
   });
 
   it("перед отправкой проверяет, что адресат всё ещё в команде и его аккаунт не изменился", async () => {
     const { db, poll, anya, igor, mark } = stagePoll();
-    expect(closePollWithMessages(db, poll, anya, "closed")).toEqual({ ok: true });
+    expect(closePollWithMessages(db, poll, anya, "closed", now)).toEqual({ ok: true });
     archiveEmployee(db, igor.id, "2026-09-29");
     db.update(employees).set({ telegramUserId: 400 }).where(eq(employees.id, mark.id)).run();
     const { bot, recorder } = silentBot();
@@ -57,7 +59,7 @@ describe("доставка после закрытия", () => {
     const db = makeTestDb();
     const anya = person(db, "Аня", 100);
     const poll = createPoll(db, { createdBy: anya.id, question: "Пицца?", closesAt: null, recipientIds: [anya.id] });
-    expect(closePollWithMessages(db, poll, anya, "closed")).toEqual({ ok: true });
+    expect(closePollWithMessages(db, poll, anya, "closed", now)).toEqual({ ok: true });
     const { bot, recorder } = silentBot();
     let started!: () => void;
     let release!: () => void;
@@ -86,7 +88,6 @@ describe("доставка после закрытия", () => {
       createdBy: anya.id, placeId: null, title: null, allowCustom: true, note: null, payHint: null,
       closesAt: null, recipientIds: [anya.id, igor.id],
     });
-    const now = { date: "2026-09-29", time: "12:00" };
     expect(addCustomItem(db, order, igor.id, { name: "Салат", price: 70, qty: 1 }, now).ok).toBe(true);
     expect(closeOrderWithMessages(db, order, anya, "closed")).toEqual({ ok: true });
     expect(setOrderPaid(db, getOrder(db, order.id)!, igor.id, igor, true).ok).toBe(true);

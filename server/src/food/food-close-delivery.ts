@@ -7,7 +7,7 @@ import { foodCloseMessages, foodOrderPayments } from "../db/schema";
 import { getEmployeeById } from "../repo/employees";
 import { isPermanentSendFailure } from "../bot/notify";
 import { safeErrorMessage } from "../util/safe-error";
-import { getPoll, hasTelegramPollFinalState, isTelegramPollSending, recordTelegramPollState, telegramPollResultText } from "../polls/poll-service";
+import { freezeTelegramPollResult, getPoll, hasTelegramPollFinalState, isTelegramPollSending, recordTelegramPollState } from "../polls/poll-service";
 
 type Scope = typeof foodCloseMessages.$inferSelect.scope;
 export type FoodCloseReason = "closed" | "cancelled";
@@ -80,10 +80,8 @@ async function deliverReadyMessages(db: Db, bot: Bot, scope: Scope | undefined, 
           await bot.api.editMessageReplyMarkup(message.telegramUserId, message.messageId, { reply_markup: new InlineKeyboard() });
         }
       } else if (message.nativePollSummary && message.scope.startsWith("poll:")) {
-        const poll = getPoll(db, Number(message.scope.slice("poll:".length)));
-        if (poll?.telegramOptions && poll.closedAt) {
-          await bot.api.sendMessage(message.telegramUserId, telegramPollResultText(db, poll), { protect_content: true });
-        }
+        const summary = freezeTelegramPollResult(db, Number(message.scope.slice("poll:".length)));
+        if (summary != null) await bot.api.sendMessage(message.telegramUserId, summary, { protect_content: true });
       } else if (message.body != null) {
         await bot.api.sendMessage(message.telegramUserId, message.body, message.keyboard ? { reply_markup: message.keyboard } : undefined);
       }
@@ -102,7 +100,9 @@ async function deliverReadyMessages(db: Db, bot: Bot, scope: Scope | undefined, 
       if (alreadyClosed) {
         // На естественном закрытии ответ stopPoll может обогнать обновление
         // poll. Дадим боту один интервал, чтобы получить точные результаты.
-        if (message.messageId != null && !hasTelegramPollFinalState(db, message.telegramUserId, message.messageId)) {
+        const poll = getPoll(db, Number(message.scope.slice("poll:".length)));
+        if (!poll?.telegramManualClosed && message.messageId != null
+            && !hasTelegramPollFinalState(db, message.telegramUserId, message.messageId)) {
           db.update(foodCloseMessages).set({ awaitingPollSnapshot: true }).where(eq(foodCloseMessages.id, id)).run();
           continue;
         }

@@ -103,9 +103,9 @@ describe("встроенный опрос Telegram", () => {
     expect(recordTelegramPollAnswer(db, "a", 100, [1], now)).toBe(false);
   });
 
-  it("учитывает итог закрытой карточки Telegram, даже если опоздал апдейт голоса", () => {
+  it("при закрытии по сроку учитывает итог Telegram, даже если опоздал апдейт голоса", () => {
     const { db, anya, poll } = telegramStage();
-    closePoll(db, poll, anya);
+    expect(closeDuePolls(db, { ...now, time: "18:00" }).map(({ id }) => id)).toEqual([poll.id]);
     const snapshot = {
       id: "a", is_closed: true, total_voter_count: 1,
       options: [{ text: "Салат", voter_count: 0 }, { text: "Суп", voter_count: 1 }, { text: "Паста", voter_count: 1 }],

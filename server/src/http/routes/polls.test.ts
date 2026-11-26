@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { GrammyError, type Bot } from "grammy";
 import { createApp } from "../app";
@@ -5,12 +8,13 @@ import { makeTestDb } from "../../db/testdb";
 import { archiveEmployee, createEmployee, linkTelegramAccount } from "../../repo/employees";
 import { signInitData } from "../../auth/telegram";
 import { testConfig } from "../../test-config";
-import type { Db } from "../../db/client";
+import { openDb, runMigrations, type Db } from "../../db/client";
 import { eq, sql } from "drizzle-orm";
 import { employees, polls } from "../../db/schema";
 import { listRecentAudit } from "../../repo/audit";
 import { runFoodTick } from "../../food/food-tick";
-import { recordTelegramPollState } from "../../polls/poll-service";
+import { retryTelegramPollInvites } from "../../polls/poll-messenger";
+import { recordTelegramPollAnswer, recordTelegramPollState } from "../../polls/poll-service";
 
 function fakeBot() {
   const sent: { to: number; text: string; id: number }[] = [];
@@ -69,8 +73,7 @@ function person(db: Db, name: string, tg: number): number {
 beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date("2026-09-29T09:00:00Z")); });
 afterEach(() => { vi.useRealTimers(); });
 
-async function stage() {
-  const db = makeTestDb();
+async function stage(db = makeTestDb()) {
   const { bot, sent, failFor, hold, api } = fakeBot();
   const app = createApp({ db, config, bot });
   const anya = person(db, "Аня", 100);
@@ -170,6 +173,148 @@ describe("опросы по HTTP", () => {
     expect(body?.includes("Предварительный")).toBe(!snapshotArrived);
   });
 
+  it("после рестарта повторяет подтверждённый 429, сохраняя неопределённую доставку без дубля", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "planer-poll-invites-"));
+    const path = join(dir, "polls.db");
+    let connection = openDb(path);
+    try {
+      runMigrations(connection.db, connection.sqlite);
+      const { app, api, anyaT, markT } = await stage(connection.db);
+      person(connection.db, "Дима", 103);
+      const sendPoll = api.sendPoll.getMockImplementation()!;
+      api.sendPoll.mockImplementation(async (chatId) => {
+        if (chatId === 101) throw new GrammyError("Rate limited", {
+          ok: false, error_code: 429, description: "Too Many Requests", parameters: { retry_after: 420 },
+        }, "sendPoll", { chat_id: chatId });
+        if (chatId === 102) throw new Error("ECONNRESET");
+        if (chatId === 103) throw new GrammyError("Blocked", {
+          ok: false, error_code: 403, description: "Forbidden: bot was blocked by the user",
+        }, "sendPoll", { chat_id: chatId });
+        return sendPoll(chatId);
+      });
+      const body = { question: "Дежурство?", closesTime: "18:00", audience: { kind: "team" },
+        telegram: { options: ["Один", "Два"], multiple: false } };
+      const response = await app.request("/api/polls", send(anyaT, body));
+      const created = await response.json();
+      expect(created).toMatchObject({
+        delivered: 0, unreachable: expect.arrayContaining(["Дима", "Игорь", "Марк"]),
+        poll: { telegram: { delivery: { pending: ["Игорь"], unknown: ["Марк"], failed: ["Дима"] } } },
+      });
+      expect(created.unreachable).toHaveLength(3);
+      const recipient = await (await app.request(`/api/polls/${created.poll.id}`, get(markT))).json();
+      expect(recipient.poll.telegram).not.toHaveProperty("delivery");
+      connection.sqlite.close();
+
+      connection = openDb(path);
+      const resumed = fakeBot();
+      resumed.api.sendPoll.mockImplementation(async (chatId) => ({
+        message_id: 90, chat: { id: chatId, type: "private" }, poll: { id: "native-90" },
+      }));
+      vi.setSystemTime(new Date("2026-09-29T09:05:00Z"));
+      await retryTelegramPollInvites(resumed.bot, connection.db, config.teamTz);
+      expect(resumed.api.sendPoll).not.toHaveBeenCalled();
+      vi.setSystemTime(new Date("2026-09-29T09:10:00Z"));
+      await retryTelegramPollInvites(resumed.bot, connection.db, config.teamTz);
+      expect(resumed.api.sendPoll.mock.calls.map(([chatId]) => chatId)).toEqual([101]);
+      expect(recordTelegramPollAnswer(connection.db, "native-90", 101, [0], {
+        date: "2026-09-29", time: "12:10",
+      })).toBe(true);
+      vi.setSystemTime(new Date("2026-09-29T09:15:00Z"));
+      await retryTelegramPollInvites(resumed.bot, connection.db, config.teamTz);
+      expect(resumed.api.sendPoll.mock.calls.map(([chatId]) => chatId)).toEqual([101]);
+      const reloaded = createApp({ db: connection.db, config, bot: resumed.bot });
+      const current = await (await reloaded.request(`/api/polls/${created.poll.id}`, get(anyaT))).json();
+      expect(current.poll.telegram.delivery).toEqual({ pending: [], unknown: ["Марк"], failed: ["Дима"] });
+    } finally {
+      if (connection.sqlite.open) connection.sqlite.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it.each(["12:01", null])("после дедлайна (%s) кнопка успевает сверить снимки до планового тика", async (closesTime) => {
+    const { db, app, api, igor, anyaT } = await stage();
+    const response = await app.request("/api/polls", send(anyaT, {
+      question: "Дежурство?", closesTime, audience: { kind: "picked", employeeIds: [igor] },
+      telegram: { options: ["Один", "Два"], multiple: false },
+    }));
+    const { poll } = await response.json();
+    if (closesTime == null) db.update(polls).set({ createdAt: new Date("2026-09-26T09:01:00Z") }).where(eq(polls.id, poll.id)).run();
+    api.stopPoll.mockResolvedValueOnce({
+      id: "native-1", is_closed: true, total_voter_count: 0,
+      options: [{ text: "Один", voter_count: 0 }, { text: "Два", voter_count: 0 }],
+    }).mockResolvedValueOnce({
+      id: "native-2", is_closed: true, total_voter_count: 1,
+      options: [{ text: "Один", voter_count: 0 }, { text: "Два", voter_count: 1 }],
+    });
+    vi.setSystemTime(new Date("2026-09-29T09:01:30Z"));
+    const done = await app.request(`/api/polls/${poll.id}/close`, send(anyaT, {}));
+    expect(done.status).toBe(200);
+    expect(await done.json()).toMatchObject({ poll: { open: false, telegram: { votedCount: 1 } } });
+    expect(api.sendMessage.mock.calls[0]?.[1]).toContain("Один — 0\n• Два — 1");
+  });
+
+  it("при ручном закрытии сохраняет известный выбор, даже если после отказа stopPoll пришёл поздний голос", async () => {
+    const { db, app, api, bot, igor, anyaT } = await stage();
+    const response = await app.request("/api/polls", send(anyaT, {
+      question: "Дежурство?", closesTime: "18:00", audience: { kind: "picked", employeeIds: [igor] },
+      telegram: { options: ["Один", "Два"], multiple: false },
+    }));
+    const { poll } = await response.json();
+    const now = { date: "2026-09-29", time: "12:00" };
+    expect(recordTelegramPollAnswer(db, "native-2", 101, [0], now)).toBe(true);
+    api.stopPoll.mockResolvedValueOnce({
+      id: "native-1", is_closed: true, total_voter_count: 0,
+      options: [{ text: "Один", voter_count: 0 }, { text: "Два", voter_count: 0 }],
+    }).mockRejectedValueOnce(new Error("ECONNRESET"));
+    expect((await app.request(`/api/polls/${poll.id}/close`, send(anyaT, {}))).status).toBe(200);
+    expect(recordTelegramPollAnswer(db, "native-2", 101, [1], now)).toBe(false);
+    api.stopPoll.mockResolvedValueOnce({
+      id: "native-2", is_closed: true, total_voter_count: 1,
+      options: [{ text: "Один", voter_count: 0 }, { text: "Два", voter_count: 1 }],
+    });
+    vi.setSystemTime(new Date("2026-09-29T09:05:01Z"));
+    await runFoodTick(db, bot, { ...now, time: "12:05" });
+    expect(api.sendMessage.mock.calls[0]?.[1]).toContain("Один — 1\n• Два — 0");
+    const { poll: current } = await (await app.request(`/api/polls/${poll.id}`, get(anyaT))).json();
+    expect(current.telegram.options[0].count).toBe(1);
+  });
+
+  it("рассылает единую версию итога, если снимок пришёл между двумя отправками", async () => {
+    const { db, app, api, bot, igor, anyaT } = await stage();
+    const response = await app.request("/api/polls", send(anyaT, {
+      question: "Дежурство?", closesTime: "12:01", audience: { kind: "picked", employeeIds: [igor] },
+      telegram: { options: ["Один", "Два"], multiple: false },
+    }));
+    const { poll } = await response.json();
+    api.stopPoll.mockResolvedValueOnce({
+      id: "native-1", is_closed: true, total_voter_count: 0,
+      options: [{ text: "Один", voter_count: 0 }, { text: "Два", voter_count: 0 }],
+    }).mockRejectedValueOnce(new GrammyError("Stop failed", {
+      ok: false, error_code: 400, description: "Bad Request: poll has already been closed",
+    }, "stopPoll", { chat_id: 101, message_id: 2 }));
+    vi.setSystemTime(new Date("2026-09-29T09:01:00Z"));
+    await runFoodTick(db, bot, { date: "2026-09-29", time: "12:01" });
+    api.sendMessage.mockImplementationOnce(async () => {
+      expect(recordTelegramPollState(db, {
+        id: "native-2", is_closed: true, total_voter_count: 1,
+        options: [{ text: "Один", voter_count: 0 }, { text: "Два", voter_count: 1 }],
+      })).toBe(true);
+      throw new Error("ECONNRESET");
+    });
+    vi.setSystemTime(new Date("2026-09-29T09:06:00Z"));
+    await runFoodTick(db, bot, { date: "2026-09-29", time: "12:06" });
+    const [first, second] = api.sendMessage.mock.calls.map(([, text]) => text);
+    expect(first).toContain("Предварительный итог");
+    expect(first).toContain("Ответили: 0");
+    expect(second).toBe(first);
+    const { poll: current } = await (await app.request(`/api/polls/${poll.id}`, get(anyaT))).json();
+    expect(current.telegram.votedCount).toBe(1);
+    vi.setSystemTime(new Date("2026-09-29T09:11:00Z"));
+    await runFoodTick(db, bot, { date: "2026-09-29", time: "12:11" });
+    expect(api.sendMessage.mock.calls.map(([chatId]) => chatId)).toEqual([100, 101, 100]);
+    expect(api.sendMessage.mock.calls[2]?.[1]).toBe(first);
+  });
+
   it("показывает имя коллеги, которому Telegram не доставил опрос", async () => {
     const { app, failFor, anyaT } = await stage();
     failFor.add(101);
@@ -190,6 +335,7 @@ describe("опросы по HTTP", () => {
     expect(response.status).toBe(201);
     const { poll } = await response.json();
     archiveEmployee(db, igor, "2026-09-29");
+    expect(recordTelegramPollAnswer(db, "native-1", 100, [1], { date: "2026-09-29", time: "12:00" })).toBe(true);
     api.stopPoll.mockRejectedValueOnce(new Error("ECONNRESET"));
     expect((await app.request(`/api/polls/${poll.id}/close`, send(anyaT, {}))).status).toBe(200);
     expect(api.stopPoll.mock.calls).toHaveLength(2);
@@ -263,7 +409,7 @@ describe("опросы по HTTP", () => {
     expect(api.stopPoll.mock.calls.map(call => call.slice(0, 2))).toEqual([[100, 1], [101, 2]]);
     expect(api.sendMessage.mock.calls.map(([chat]) => chat)).toEqual([100, 101]);
     const [first, second] = api.sendMessage.mock.calls.map(([, text]) => text);
-    expect(first).toContain("Один — 0\n• Два — 1");
+    expect(first).toContain("Один — 0\n• Два — 0");
     expect(second).toBe(first);
   });
 

@@ -64,6 +64,22 @@ async function twoPeople() {
   return { db, app, sent, admin, igor, adminToken, igorToken, id };
 }
 
+describe("тело отметки оплаты сбора", () => {
+  it.each(["участник", "администратор"])("%s получает 400 на JSON null", async (payer) => {
+    const { app, adminToken, igorToken, id, igor } = await twoPeople();
+    await app.request(`/api/admin/collections/${id}/send`, send(adminToken, { confirm: true }, "POST"));
+    const admin = payer === "администратор";
+    const paymentsPath = `/api/admin/collections/${id}/payments`;
+    const path = admin ? `${paymentsPath}/${igor}` : `/api/collections/${id}/paid`;
+
+    const response = await app.request(path, send(admin ? adminToken : igorToken, null, "POST"));
+
+    expect(response.status).toBe(400);
+    const payments = await app.request(paymentsPath, auth(adminToken));
+    expect(await payments.json()).toMatchObject({ paidCount: 0 });
+  });
+});
+
 describe("POST /api/collections/:id/paid", () => {
   it("работник отмечает себя, счёт растёт", async () => {
     const { app, adminToken, igorToken, id } = await twoPeople();

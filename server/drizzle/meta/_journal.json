@@ -351,6 +351,13 @@
       "when": 1794907125219,
       "tag": "0049_telegram_polls",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "6",
+      "when": 1795668971796,
+      "tag": "0050_telegram_poll_delivery",
+      "breakpoints": true
     }
   ]
 }

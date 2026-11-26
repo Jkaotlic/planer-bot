@@ -9,6 +9,7 @@ import { signInitData } from "../auth/telegram";
 import { employees } from "../db/schema";
 import { testConfig } from "../test-config";
 import { recordApi, stubBotInfo } from "../bot/testbot";
+import { createTelegramLiveness, TELEGRAM_STALE_MS } from "../bot/telegram-liveness";
 
 const config = testConfig();
 
@@ -39,8 +40,10 @@ describe("app auth", () => {
 
   it("health краснеет, когда опрос числится, но Telegram давно не отвечает (07.10, 18 минут молчания)", async () => {
     const bot = { isRunning: () => true } as never;
-    const since = new Date(Date.UTC(2026, 9, 7, 17, 2));
-    const liveness = { recordOk() {}, recordFailure() {}, status: () => ({ reachable: false as const, since }) };
+    let now = Date.UTC(2026, 9, 7, 17, 2);
+    const liveness = createTelegramLiveness({ now: () => now, log() {}, teamTz: config.teamTz });
+    liveness.recordFailure();
+    now += 18 * 60_000;
     const res = await createApp({ db: makeTestDb(), config, bot, liveness }).request("/api/health");
     expect(res.status).toBe(503);
     expect(await res.json()).toEqual({ ok: false, bot: "unreachable", since: "2026-10-07T17:02:00.000Z" });
@@ -48,10 +51,29 @@ describe("app auth", () => {
 
   it("health зелёный, когда Telegram отвечает", async () => {
     const bot = { isRunning: () => true } as never;
-    const liveness = { recordOk() {}, recordFailure() {}, status: () => ({ reachable: true as const }) };
+    const liveness = createTelegramLiveness({ now: () => 0, log() {}, teamTz: config.teamTz });
     const res = await createApp({ db: makeTestDb(), config, bot, liveness }).request("/api/health");
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true });
+  });
+
+  it("health различает доступность Telegram и успешный приём обновлений", async () => {
+    const bot = { isRunning: () => true } as never;
+    let now = Date.UTC(2026, 9, 7, 17);
+    const liveness = createTelegramLiveness({ now: () => now, log() {}, teamTz: config.teamTz });
+    const app = createApp({ db: makeTestDb(), config, bot, liveness });
+    liveness.recordPollSuccess();
+    now += TELEGRAM_STALE_MS + 1;
+    liveness.recordOk();
+
+    const stale = await app.request("/api/health");
+    expect(stale.status).toBe(503);
+    expect(await stale.json()).toEqual({ ok: false, bot: "polling_stale", since: "2026-10-07T17:00:00.000Z" });
+
+    liveness.recordPollSuccess();
+    const recovered = await app.request("/api/health");
+    expect(recovered.status).toBe(200);
+    expect(await recovered.json()).toEqual({ ok: true });
   });
 
   it("health зелёный, пока опрос идёт", async () => {

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { TelegramPollDeliveryView } from "./api/food";
 import { formatDayMonth } from "./collection";
 import { FOOD_CLOSE_HORIZON_DAYS } from "./food-order";
 import { TELEGRAM_TEXT_SAFE_MAX } from "./text-limits";
@@ -31,6 +32,15 @@ export const telegramPollConfigSchema = z.object({
   multiple: z.boolean(),
 }).strict();
 export type TelegramPollConfig = z.infer<typeof telegramPollConfigSchema>;
+
+export function telegramPollDeliveryText(delivery: TelegramPollDeliveryView | undefined): string {
+  if (!delivery) return "";
+  const lines = [];
+  if (delivery.pending.length) lines.push(`Ожидают отправки: ${delivery.pending.join(", ")}`);
+  if (delivery.unknown.length) lines.push(`Доставка не подтверждена: ${delivery.unknown.join(", ")}`);
+  if (delivery.failed.length) lines.push(`Не доставлены: ${delivery.failed.join(", ")}`);
+  return lines.join(" · ");
+}
 
 /**
  * Сколько дней живёт опрос без срока, прежде чем тик закроет его сам.

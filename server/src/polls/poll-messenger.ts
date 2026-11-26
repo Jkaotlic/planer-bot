@@ -1,6 +1,6 @@
-import { InlineKeyboard, type Bot } from "grammy";
+import { GrammyError, HttpError, InlineKeyboard, type Bot } from "grammy";
 import {
-  POLL_CHOICE_LABEL, POLL_CHOICES, POLL_OPEN_MAX_DAYS, closesLetterLabel, isOpenAt, pollInviteText,
+  POLL_CHOICE_LABEL, POLL_CHOICES, closesLetterLabel, isOpenAt, pollInviteText,
   pollResultText, pollTally, shiftStartMs, type PollChoice,
 } from "@planer/shared";
 import type { Db } from "../db/client";
@@ -11,7 +11,8 @@ import { notifyUser } from "../bot/notify";
 import { safeErrorMessage } from "../util/safe-error";
 import { getEmployeeById } from "../repo/employees";
 import {
-  beginTelegramPollSending, getPoll, pollRecipientRows, setPollMessageId, setTelegramPollMessage, voteOf, type TeamClock,
+  POLL_OPEN_MAX_AGE_MS, beginTelegramPollSending, claimTelegramPollInvite, dueTelegramPollInvites, getPoll, pollRecipientRows,
+  resolveTelegramPollInviteFailure, setPollMessageId, setTelegramPollMessage, voteOf, type TeamClock,
 } from "./poll-service";
 import { deliverFoodCloseMessages, queueFoodCloseMessages, type FoodCloseMessage, type FoodCloseReason } from "../food/food-close-delivery";
 
@@ -138,13 +139,42 @@ async function remindTelegramPoll(bot: Bot, db: Db, poll: Poll) {
 
 function telegramPollDeadline(poll: Poll, teamTz: string): number {
   if (poll.closesAt == null) {
-    return Math.min(poll.createdAt.getTime(), Date.now()) + POLL_OPEN_MAX_DAYS * 24 * 60 * 60 * 1000;
+    return Math.min(poll.createdAt.getTime(), Date.now()) + POLL_OPEN_MAX_AGE_MS;
   }
   const [date, start] = poll.closesAt.split("T");
   return shiftStartMs({ date: date!, start: start! }, teamTz);
 }
 
-async function sendTelegramPollInvites(bot: Bot, db: Db, poll: Poll, options: readonly string[], teamTz: string): Promise<number> {
+function recordTelegramPollSendFailure(db: Db, pollId: number, employeeId: number, error: unknown): void {
+  if (error instanceof GrammyError && error.error_code === 429) {
+    resolveTelegramPollInviteFailure(db, pollId, employeeId, Date.now() + (error.parameters.retry_after ?? 0) * 1000);
+  } else if (error instanceof GrammyError && error.error_code >= 400 && error.error_code < 500) {
+    resolveTelegramPollInviteFailure(db, pollId, employeeId, null);
+  } else if (error instanceof HttpError && error.error instanceof Error && "code" in error.error
+      && ["EAI_AGAIN", "ENOTFOUND", "ECONNREFUSED"].includes(String(error.error.code))) {
+    // Ошибка DNS или отказ соединения означают, что запрос не дошёл до Telegram.
+    resolveTelegramPollInviteFailure(db, pollId, employeeId, Date.now());
+  }
+  console.error("telegram poll send failed:", safeErrorMessage(error));
+}
+
+export async function retryTelegramPollInvites(bot: Bot, db: Db, teamTz: string): Promise<void> {
+  for (const poll of dueTelegramPollInvites(db, Date.now())) await sendTelegramPollInvites(bot, db, poll, teamTz);
+}
+
+async function sendTelegramPollInvites(bot: Bot, db: Db, poll: Poll, teamTz: string): Promise<number> {
+  if (!poll.telegramOptions) return 0;
+  const finishSending = beginTelegramPollSending(db, poll.id);
+  if (!finishSending) return 0;
+  try {
+    return await sendTelegramPollCards(bot, db, poll, poll.telegramOptions, teamTz);
+  } finally {
+    finishSending();
+    if (getPoll(db, poll.id)?.closedAt) await deliverFoodCloseMessages(db, bot, `poll:${poll.id}`);
+  }
+}
+
+async function sendTelegramPollCards(bot: Bot, db: Db, poll: Poll, options: readonly string[], teamTz: string): Promise<number> {
   const deadline = telegramPollDeadline(poll, teamTz);
   const scope = `poll:${poll.id}` as const;
   let delivered = 0;
@@ -157,6 +187,7 @@ async function sendTelegramPollInvites(bot: Bot, db: Db, poll: Poll, options: re
     if (!fresh || fresh.closedAt || fresh.cancelledAt || deadline - Date.now() < 7_000) break;
     const owner = getEmployeeById(db, employeeId);
     if (chatId == null || !owner?.isActive || owner.telegramUserId !== chatId || recipient.telegramPollId != null) continue;
+    if (!claimTelegramPollInvite(db, poll.id, employeeId, Date.now())) continue;
     const kb = new InlineKeyboard().text("📊 Итоги", `poll:r:${poll.id}`);
     if (employeeId === poll.createdBy) kb.row().text("🔒 Закрыть опрос", `poll:close:${poll.id}`);
     const sent = await bot.api.sendPoll(chatId, poll.question, options.map(text => ({ text })), {
@@ -168,7 +199,7 @@ async function sendTelegramPollInvites(bot: Bot, db: Db, poll: Poll, options: re
       reply_markup: kb,
       close_date: Math.floor(deadline / 1000),
     }).catch(err => {
-      console.error("telegram poll send failed:", safeErrorMessage(err));
+      recordTelegramPollSendFailure(db, poll.id, employeeId, err);
       return null;
     });
     if (!sent?.poll?.id || sent.chat?.type !== "private" || sent.chat.id !== chatId
@@ -196,16 +227,7 @@ async function sendTelegramPollInvites(bot: Bot, db: Db, poll: Poll, options: re
 }
 
 export async function sendPollInvites(bot: Bot, db: Db, poll: Poll, now: TeamClock, teamTz: string): Promise<number> {
-  if (poll.telegramOptions) {
-    const finishSending = beginTelegramPollSending(db, poll.id);
-    if (!finishSending) return 0;
-    try {
-      return await sendTelegramPollInvites(bot, db, poll, poll.telegramOptions, teamTz);
-    } finally {
-      finishSending();
-      if (getPoll(db, poll.id)?.closedAt) await deliverFoodCloseMessages(db, bot, `poll:${poll.id}`);
-    }
-  }
+  if (poll.telegramOptions) return sendTelegramPollInvites(bot, db, poll, teamTz);
   let delivered = 0;
   for (const r of pollRecipientRows(db, poll.id)) {
     if (r.telegramUserId == null) continue;

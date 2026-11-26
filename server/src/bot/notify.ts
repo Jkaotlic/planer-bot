@@ -235,7 +235,14 @@ export function isPermanentSendFailure(err: unknown): boolean {
  * they didn't know existed — the moment somebody wants these to stop is the
  * moment one is in front of them, so that is where the button belongs.
  */
-export async function notifyReminder(bot: Bot, telegramUserId: number, text: string, appUrl?: string, shift?: ShiftReminderDetails): Promise<SendOutcome> {
+export async function notifyReminder(
+  bot: Bot,
+  telegramUserId: number,
+  text: string,
+  appUrl?: string,
+  shift?: ShiftReminderDetails,
+  canFallback?: () => boolean,
+): Promise<{ ok: true; messageId: number } | Extract<SendOutcome, { ok: false }> | undefined> {
   const kb = new InlineKeyboard();
   // Вечер накануне — момент, когда человек понимает, что выйти не может. Под
   // рукой должно быть действие, а не только «замолчи». Инлайн-`web_app`, не
@@ -247,26 +254,32 @@ export async function notifyReminder(bot: Bot, telegramUserId: number, text: str
     if (widget) {
       // grammY 1.44 не описывает sendWidget, но raw использует обычный транспорт.
       const api = bot.api.raw as unknown as {
-        sendWidget(payload: { chat_id: number; html: string; caption: string; reply_markup: InlineKeyboard }): Promise<unknown>;
+        sendWidget(payload: { chat_id: number; html: string; caption: string; reply_markup: InlineKeyboard }): Promise<{ message_id: number }>;
       };
       try {
-        await api.sendWidget({ chat_id: telegramUserId, ...widget, reply_markup: kb });
-        return { ok: true };
+        const message = await api.sendWidget({ chat_id: telegramUserId, ...widget, reply_markup: kb });
+        return { ok: true, messageId: message.message_id };
       } catch (err) {
         // Явный отказ запроса позволяет перейти на текст. После сетевой
         // ошибки исход отправки неизвестен, поэтому второй вызов здесь лишний.
         if (!(err instanceof GrammyError && (err.error_code === 400 || err.error_code === 404))) throw err;
+        if (canFallback && !canFallback()) return;
         console.warn("notifyReminder: widget refused, using text:", err.error_code);
       }
     }
-    await bot.api.sendMessage(telegramUserId, text, { reply_markup: kb });
-    return { ok: true };
+    const message = await bot.api.sendMessage(telegramUserId, text, { reply_markup: kb });
+    return { ok: true, messageId: message.message_id };
   } catch (err) {
     console.error(`notifyReminder: failed for ${telegramUserId}:`, safeErrorMessage(err));
+    // Код 400 бывает и у неверного текста или кнопки. Такой ответ не доказывает,
+    // что чат закрыт, и не должен отменять догоняющее письмо после исправления.
+    const telegram = err instanceof GrammyError ? err : undefined;
+    const missingChat = telegram?.error_code === 400 &&
+      /^(?:Bad Request: )?(?:chat not found|user not found|user is deactivated)$/i.test(telegram.description);
     return {
       ok: false,
-      permanent: isPermanentSendFailure(err),
-      errorCode: err instanceof GrammyError ? err.error_code : undefined,
+      permanent: telegram?.error_code === 403 || missingChat,
+      errorCode: telegram?.error_code,
     };
   }
 }

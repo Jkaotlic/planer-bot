@@ -2,7 +2,7 @@ import { orderTotal } from "@planer/shared";
 import type { Db } from "../db/client";
 import type { FoodOrder, Poll } from "../db/schema";
 import { recordAudit } from "../repo/audit";
-import { cancelPoll, closeDuePolls, closePoll, type TeamClock } from "../polls/poll-service";
+import { cancelPoll, closeDuePolls, closePoll, freezeTelegramPollResult, isTelegramPollOpenAt, type TeamClock } from "../polls/poll-service";
 import { queuePollCloseMessages } from "../polls/poll-messenger";
 import { cancelOrder, closeDueOrders, closeOrder, itemsOf } from "../orders/order-service";
 import { placeName, queueOrderCloseMessages } from "../orders/order-messenger";
@@ -26,10 +26,15 @@ function recordOrderClose(db: Db, order: FoodOrder, reason: FoodCloseReason, act
 }
 
 /** Состояние и будущие письма сохраняются вместе, в том числе при остановке процесса. */
-export function closePollWithMessages(db: Db, poll: Poll, viewer: Viewer, reason: FoodCloseReason) {
+export function closePollWithMessages(db: Db, poll: Poll, viewer: Viewer, reason: FoodCloseReason, now: TeamClock) {
   return db.transaction((tx) => {
-    const result = reason === "closed" ? closePoll(tx, poll, viewer) : cancelPoll(tx, poll, viewer);
-    if (result.ok) recordPollClose(tx, poll, reason, viewer.id);
+    // По истечении срока кнопка лишь запускает сверку с Telegram раньше тика.
+    const manual = poll.telegramOptions != null && isTelegramPollOpenAt(poll, now);
+    const result = reason === "closed" ? closePoll(tx, poll, viewer, manual ? "manual" : "deadline") : cancelPoll(tx, poll, viewer);
+    if (result.ok) {
+      if (reason === "closed" && manual) freezeTelegramPollResult(tx, poll.id);
+      recordPollClose(tx, poll, reason, viewer.id);
+    }
     return result;
   });
 }

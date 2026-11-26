@@ -2,6 +2,7 @@ import { Bot } from "grammy";
 import { describe, expect, it } from "vitest";
 import { keepPolling } from "./polling";
 import { stubBotInfo } from "./testbot";
+import { createTelegramLiveness, installLivenessTracker, TELEGRAM_STALE_MS } from "./telegram-liveness";
 
 type PollReply = 409 | "ok";
 
@@ -82,4 +83,43 @@ describe("keepPolling", () => {
     expect(h.sleeps).toEqual([5_000]);
     expect(h.exits).toEqual([]);
   });
+});
+
+it("distinguishes failed incoming polling from reachable Telegram API and recovers on the next successful poll", async () => {
+  const bot = stubBotInfo(new Bot("test-token"));
+  let now = Date.UTC(2026, 6, 14, 14);
+  const lastSuccessfulPoll = now;
+  const lines: string[] = [];
+  const liveness = createTelegramLiveness({ now: () => now, log: (line) => lines.push(line), teamTz: "Europe/Moscow" });
+  let polls = 0;
+  const observations: unknown[] = [];
+
+  bot.api.config.use(async (_prev, method) => {
+    if (method === "deleteWebhook" || method === "sendMessage") return { ok: true, result: {} } as never;
+    if (method !== "getUpdates") throw new Error(`unexpected method: ${method}`);
+    polls += 1;
+    if (polls === 1 || polls === 4) return { ok: true, result: [] } as never;
+    if (polls === 2) {
+      now += TELEGRAM_STALE_MS + 1;
+      return { ok: false, error_code: 429, parameters: { retry_after: 0 }, description: "Too Many Requests" };
+    }
+    if (polls === 3) {
+      // Даже удачная исходящая отправка не делает входящие снова рабочими.
+      await bot.api.sendMessage(123, "Проверка");
+      observations.push(liveness.status(), liveness.pollingStatus(), liveness.pollingStatus());
+      return { ok: false, error_code: 429, parameters: { retry_after: 0 }, description: "Too Many Requests" };
+    }
+    observations.push(liveness.pollingStatus());
+    return { ok: false, error_code: 401, description: "Unauthorized" };
+  });
+  installLivenessTracker(bot, liveness);
+
+  await keepPolling({
+    bot, onStart() {}, onPollSuccess: () => liveness.recordPollSuccess(),
+    log() {}, sleep: async () => {}, exit() {},
+  });
+
+  const stale = { fresh: false, since: new Date(lastSuccessfulPoll) };
+  expect(observations).toEqual([{ reachable: true }, stale, stale, { fresh: true }]);
+  expect(lines).toHaveLength(2);
 });

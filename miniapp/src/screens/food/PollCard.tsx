@@ -1,6 +1,6 @@
 import { useState } from "react";
 import {
-  POLL_CHOICE_LABEL, POLL_CHOICES, canRemindSilent, cancelPollQuestion, closePollQuestion, pollRemindResultText, pollStatusLabel, pollTallyLines,
+  POLL_CHOICE_LABEL, POLL_CHOICES, canRemindSilent, cancelPollQuestion, closePollQuestion, pollRemindResultText, pollStatusLabel, pollTallyLines, telegramPollDeliveryText,
 } from "@planer/shared";
 import { apiClient, type PollView } from "../../api/client";
 import { ActionButton, Card } from "../../ui";
@@ -45,6 +45,7 @@ export function PollCard({ poll: initial }: { poll: PollView }) {
 
   const status = pollStatusLabel(poll);
   const { telegram } = poll;
+  const deliveryText = telegramPollDeliveryText(telegram?.delivery);
   const refresh = () => attempt(async () => setPoll(await apiClient.getPoll(poll.id)), false);
   return (
     <Card>
@@ -64,6 +65,7 @@ export function PollCard({ poll: initial }: { poll: PollView }) {
             {telegram.canVote ? "Проголосуй в личном чате с ботом." : "Опрос проходит в личном чате с ботом."}
             {telegram.canVote && telegram.multiple && " Можно выбрать несколько вариантов."}
           </div>}
+          {deliveryText && <div style={{ color: "var(--tgui--hint_color)", fontSize: "var(--app-text-meta)", overflowWrap: "anywhere" }}>{deliveryText}</div>}
           <ul role="list" aria-label="Общий итог" style={{ display: "grid", gap: 6, margin: 0, padding: 0, listStyle: "none" }}>
             {telegram.options.map(({ text, count }, index) => (
               <li key={text} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 8, overflowWrap: "anywhere" }}>

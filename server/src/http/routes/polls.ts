@@ -82,7 +82,10 @@ export function createPollRoutes(deps: { db: Db; config: Config; bot?: Bot }): H
     // Замок живёт только пока идёт рассылка; повтор ПОСЛЕ неё (ответ потерялся
     // по дороге, а письма дошли) ловит окно по базе.
     if (hasRecentSamePoll(db, viewer.id, parsed.data.question)) {
-      return c.json({ error: "Такой уже разослан пару минут назад — проверь чат." }, 409);
+      const error = parsed.data.telegram
+        ? "Такой опрос уже создан. Проверь его в разделе «Заказы и опросы»."
+        : "Такой уже разослан пару минут назад — проверь чат.";
+      return c.json({ error }, 409);
     }
     inFlight.add(key);
     let poll: ReturnType<typeof createPoll>;
@@ -179,7 +182,7 @@ export function createPollRoutes(deps: { db: Db; config: Config; bot?: Bot }): H
       const now = teamNow(config.teamTz);
       const poll = getPoll(db, Number(c.req.param("id")));
       if (!poll || !pollView(db, poll, viewer, now)) return c.json({ error: NOT_FOUND }, 404);
-      const result = closePollWithMessages(db, poll, viewer, action === "close" ? "closed" : "cancelled");
+      const result = closePollWithMessages(db, poll, viewer, action === "close" ? "closed" : "cancelled", now);
       if (!result.ok) return c.json({ error: result.error }, 409);
       const fresh = getPoll(db, poll.id)!;
       if (bot) await deliverFoodCloseMessages(db, bot, `poll:${poll.id}`);

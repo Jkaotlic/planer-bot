@@ -474,15 +474,37 @@ export async function apiScenarios() {
       const { poll: current } = ok(await j("GET", `/api/polls/${poll.id}`, { token: w2 }));
       return current.telegram.votedCount === 1;
     }), "голос не отозван");
-    // Telegram принял изменение, но событие ещё не дошло до long-polling.
+    // Ручное закрытие фиксирует выбор, который приложение уже успело получить.
     tg.voteNative(W2.id, "Марк", second.pollId, [1], false);
     ok(await j("POST", `/api/polls/${poll.id}/close`, { token: w1, body: {} }));
     assert(await until(() => ballots.every((ballot) => tg.calls.some((call) =>
       call.method === "stopPoll" && call.body.chat_id === ballot.body.chat_id && call.body.message_id === ballot.messageId
     ))), "не все карточки остановлены");
     const closed = ok(await j("GET", `/api/polls/${poll.id}`, { token: w2 })).poll;
-    assert(closed.telegram.myOptionIds.join(",") === "1", "потерян выбор из финального снимка Telegram");
-    assert(tg.sentTo(W2.id).some((call) => call.body.text.includes(question) && call.body.text.includes("Парк — 1")), "рассылка использовала старый итог");
+    assert(closed.telegram.myOptionIds.join(",") === "2", "ручное закрытие учло голос, неизвестный приложению");
+    assert(tg.sentTo(W2.id).some((call) => call.body.text.includes(question) && call.body.text.includes("Музей — 1")), "рассылка не зафиксировала итог ручного закрытия");
+  });
+  await check("планировщик досылает личный опрос после 429 до короткого дедлайна", async () => {
+    const question = "Когда пьём чай?";
+    const closesTime = new Date(Date.now() + 90_000 + 3 * 3600e3).toISOString().slice(11, 16);
+    tg.rateLimitNextPollFor.set(W2.id, 1);
+    const result = ok(await j("POST", "/api/polls", {
+      token: w1,
+      body: {
+        question, closesTime, audience: { kind: "picked", employeeIds: [w2id] },
+        telegram: { options: ["Сейчас", "После смены"], multiple: false },
+      },
+    }), 201);
+    assert(result.delivered === 0 && result.poll.telegram.delivery?.pending.length === 1, "первый отказ не попал в очередь");
+    const delivered = await until(async () => {
+      const { poll } = ok(await j("GET", `/api/polls/${result.poll.id}`, { token: w2 }));
+      return poll.telegram.canVote;
+    }, 15_000, 250);
+    assert(delivered, "планировщик не дослал личную карточку после 429");
+    const attempts = tg.calls.filter((call) => call.method === "sendPoll" && call.body.question === question);
+    assert(attempts.filter((call) => call.body.chat_id === W1.id).length === 1, "бот повторил подтверждённую отправку");
+    assert(attempts.filter((call) => call.body.chat_id === W2.id).length === 2, "у адресата должно быть две попытки");
+    ok(await j("POST", `/api/polls/${result.poll.id}/close`, { token: w1, body: {} }));
   });
   await check("заказ еды: место → заказ → позиция → правка; чужую позицию админ не удаляет", async () => {
     const pl = ok(

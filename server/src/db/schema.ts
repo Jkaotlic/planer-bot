@@ -815,6 +815,8 @@ export const polls = sqliteTable("polls", {
   question: text().notNull(),
   telegramOptions: text({ mode: "json" }).$type<string[]>(),
   telegramMultiple: integer({ mode: "boolean" }).notNull().default(false),
+  telegramManualClosed: integer({ mode: "boolean" }).notNull().default(false),
+  telegramResultText: text(),
   closesAt: text(),
   closedAt: integer({ mode: "timestamp" }),
   cancelledAt: integer({ mode: "timestamp" }),
@@ -838,8 +840,14 @@ export const pollRecipients = sqliteTable(
     telegramPollChatId: integer(),
     telegramChoices: text({ mode: "json" }).$type<number[]>(),
     telegramFinalized: integer({ mode: "boolean" }).notNull().default(false),
+    telegramInviteState: text({ enum: ["pending", "unknown", "delivered", "failed"] }),
+    telegramInviteRetryAt: integer().notNull().default(0),
   },
-  (t) => [primaryKey({ columns: [t.pollId, t.employeeId] }), uniqueIndex("poll_recipient_telegram_poll").on(t.telegramPollId)],
+  (t) => [
+    primaryKey({ columns: [t.pollId, t.employeeId] }),
+    uniqueIndex("poll_recipient_telegram_poll").on(t.telegramPollId),
+    index("poll_recipient_telegram_invite_due").on(t.telegramInviteState, t.telegramInviteRetryAt),
+  ],
 );
 
 /** Голос. Один на человека: переголосование — перезапись, а не вторая строка. */

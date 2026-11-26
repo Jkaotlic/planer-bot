@@ -44,6 +44,18 @@ it("карточка Telegram показывает общий итог и пре
   expect(el.textContent).toContain("Ответили: 4");
 });
 
+it("организатор видит ожидающую, неопределённую и неудавшуюся доставку карточек", async () => {
+  const telegram = {
+    options: [{ text: "Парк", count: 0 }, { text: "Музей", count: 0 }],
+    multiple: false, myOptionIds: [], votedCount: 0, canVote: true,
+    delivery: { pending: ["Игорь"], unknown: ["Марк"], failed: ["Дима"] },
+  };
+  const el = await mountCard({ ...POLL, canManage: true, telegram });
+  expect(el.textContent).toContain("Ожидают отправки: Игорь");
+  expect(el.textContent).toContain("Доставка не подтверждена: Марк");
+  expect(el.textContent).toContain("Не доставлены: Дима");
+});
+
 // Любой отказ — повод перечитать опрос, как делает `OrderScreen`: раньше
 // карточка гасила кнопки только по тексту «Опрос закрыт.», а отменённый или
 // удалённый опрос оставлял их висеть активными.

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { recordApi, stubBotInfo } from "../bot/testbot";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { Bot } from "grammy";
 import { countEmployeeByIdLookups, countTemplateByIdLookups, makeTestDb } from "../db/testdb";
 import { employees, shiftTemplates } from "../db/schema";
@@ -9,7 +9,7 @@ import { createShift, updateShift, deleteShift } from "../repo/shifts";
 import { hasEveningReminder, addReminder } from "../repo/reminders";
 import { listRecentAudit } from "../repo/audit";
 import { setReminderHour } from "../repo/settings";
-import { prevDate } from "@planer/shared";
+import { ENTRY_LOCATION_MAX, prevDate, validateReminderTemplate } from "@planer/shared";
 import { runReminderTick } from "./reminder-service";
 import type { Db } from "../db/client";
 
@@ -72,6 +72,12 @@ describe("runReminderTick", () => {
     expect(JSON.stringify(calls[0]?.payload)).toContain("reminders:off");
     expect(count).toBe(code === 200 || fallback ? 1 : 0);
     expect(hasEveningReminder(db, shift.id, anya.id)).toBe(code === 200 || fallback || code === 403);
+    if (count === 1) {
+      const event = listRecentAudit(db, 10).find((row) => row.type === "reminders_dispatched");
+      expect(event?.payload).toMatchObject({
+        deliveries: [{ shiftId: shift.id, employeeId: anya.id, message_id: 10 }],
+      });
+    }
     if (code === 200) {
       await runReminderTick(db, bot, { date: TODAY, time: "20:35" }, "https://example.com", true);
       expect(calls).toHaveLength(1);
@@ -170,6 +176,86 @@ describe("runReminderTick", () => {
     expect(sent[0]?.chat_id).toBe(222);
   });
 
+  it.each(["reassigned", "moved", "unavailable", "template-disabled", "archive"])(
+    "takes into account that the next shift changed during an earlier send (%s)",
+    async (change) => {
+      const db = makeTestDb();
+      const first = linkedEmployee(db, "Аня", 111);
+      const previous = linkedEmployee(db, "Марк", 222);
+      const replacement = linkedEmployee(db, "Игорь", 333);
+      const template = db.insert(shiftTemplates).values({
+        name: "Утро", start: "08:00", end: "17:00", sendReminder: true,
+      }).returning().get();
+      createShift(db, { date: TOMORROW, start: "07:00", end: "16:00", employeeId: first.id });
+      const shift = createShift(db, {
+        date: TOMORROW, start: "08:00", end: "17:00", employeeId: previous.id, templateId: template.id,
+      });
+      const { bot, sent } = testBot();
+      bot.api.config.use(async (prev, method, payload, signal) => {
+        if (method === "sendMessage" && (payload as { chat_id: number }).chat_id === first.telegramUserId) {
+          await Promise.resolve();
+          if (change === "reassigned") updateShift(db, shift.id, { employeeId: replacement.id });
+          if (change === "moved") updateShift(db, shift.id, { date: "2026-07-16" });
+          if (change === "unavailable") {
+            createShift(db, { date: TODAY, endDate: TOMORROW, category: "sick_leave", employeeId: previous.id });
+          }
+          if (change === "template-disabled") {
+            db.update(shiftTemplates).set({ sendReminder: false }).where(eq(shiftTemplates.id, template.id)).run();
+          }
+          if (change === "archive") {
+            db.update(employees).set({ isActive: false }).where(eq(employees.id, previous.id)).run();
+          }
+        }
+        return prev(method, payload, signal);
+      });
+
+      await runReminderTick(db, bot, { date: TODAY, time: "20:30" });
+
+      expect(sent.map((message) => message.chat_id)).toEqual(change === "reassigned" ? [111, 333] : [111]);
+      expect(hasEveningReminder(db, shift.id, previous.id)).toBe(false);
+    },
+  );
+
+  it("пропускает догоняющее письмо, если смена началась, пока шло предыдущее письмо", async () => {
+    const db = makeTestDb();
+    const first = linkedEmployee(db, "Аня", 111);
+    const second = linkedEmployee(db, "Игорь", 222);
+    createShift(db, { date: TODAY, start: "07:00", end: "16:00", employeeId: first.id });
+    createShift(db, { date: TODAY, start: "08:00", end: "17:00", employeeId: second.id });
+    const { bot, sent } = testBot();
+    let now = { date: TODAY, time: "06:55" };
+    bot.api.config.use(async (prev, method, payload, signal) => {
+      if (method === "sendMessage") now = { date: TODAY, time: "08:00" };
+      return prev(method, payload, signal);
+    });
+
+    await runReminderTick(db, bot, () => now);
+
+    expect(sent.map((message) => message.chat_id)).toEqual([111]);
+  });
+
+  it("не отправляет обычный текст прежнему работнику после задержанного отказа виджета", async () => {
+    const db = makeTestDb();
+    const previous = linkedEmployee(db, "Аня", 111);
+    const replacement = linkedEmployee(db, "Игорь", 222);
+    const shift = createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: previous.id });
+    const { bot, sent } = testBot();
+    bot.api.config.use(async (prev, method, payload, signal) => {
+      if (String(method) === "sendWidget") {
+        await Promise.resolve();
+        updateShift(db, shift.id, { employeeId: replacement.id });
+        return { ok: false, error_code: 400, description: "Bad Request: invalid widget" };
+      }
+      return prev(method, payload, signal);
+    });
+
+    expect(await runReminderTick(db, bot, { date: TODAY, time: "20:30" }, "https://example.com", true)).toBe(0);
+    expect(sent).toEqual([]);
+    expect(hasEveningReminder(db, shift.id, previous.id)).toBe(false);
+    expect(await runReminderTick(db, bot, { date: TODAY, time: "20:35" })).toBe(1);
+    expect(sent[0]?.chat_id).toBe(222);
+  });
+
   it("does not record a reminder when the send fails, and retries on the next tick", async () => {
     const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const db = makeTestDb();
@@ -236,6 +322,45 @@ describe("runReminderTick", () => {
     }
   });
 
+  it.each(["Bad Request: message text is empty", "Bad Request: message is too long", "Bad Request: BUTTON_URL_INVALID"])(
+    "считает ошибку запроса %s отдельно от недоступного чата",
+    async (description) => {
+      const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      try {
+        const db = makeTestDb();
+        const anya = linkedEmployee(db, "Аня", 111);
+        const shift = createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: anya.id });
+        const failing = refusingBot(400, description);
+
+        expect(await runReminderTick(db, failing.bot, { date: TODAY, time: "20:30" })).toBe(0);
+        expect(failing.attempts).toBe(1);
+        expect(hasEveningReminder(db, shift.id, anya.id)).toBe(false);
+        expect(listRecentAudit(db, 10).some((row) => row.type === "reminder_undeliverable")).toBe(false);
+        const { bot, sent } = testBot();
+        expect(await runReminderTick(db, bot, { date: TOMORROW, time: "07:00" })).toBe(1);
+        expect(sent[0]?.text).toContain("08:00–17:00");
+      } finally {
+        errorLog.mockRestore();
+      }
+    },
+  );
+
+  it("гасит повтор, когда Telegram отвечает 400 об отсутствии чата", async () => {
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const db = makeTestDb();
+      const owner = linkedEmployee(db, "Аня", 111);
+      const shift = createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: owner.id });
+      const failing = refusingBot(400, "Bad Request: chat not found");
+
+      expect(await runReminderTick(db, failing.bot, { date: TODAY, time: "20:30" })).toBe(0);
+      expect(hasEveningReminder(db, shift.id, owner.id)).toBe(true);
+      expect(listRecentAudit(db, 10).some((row) => row.type === "reminder_undeliverable")).toBe(true);
+    } finally {
+      errorLog.mockRestore();
+    }
+  });
+
   it("keeps retrying when Telegram is merely busy (429), and journals nothing", async () => {
     const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const db = makeTestDb();
@@ -278,8 +403,8 @@ describe("runReminderTick", () => {
     // бы правильный `sent: count` от ошибочного `sent: shifts.length`.
     const igor = linkedEmployee(db, "Игорь", 113);
     setRemindersEnabled(db, igor.id, false);
-    createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: anya.id });
-    createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: mark.id });
+    const first = createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: anya.id });
+    const second = createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: mark.id });
     createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: igor.id });
 
     const { bot } = testBot();
@@ -287,8 +412,85 @@ describe("runReminderTick", () => {
 
     const rows = listRecentAudit(db, 20).filter((row) => row.type === "reminders_dispatched");
     expect(rows).toHaveLength(1);
-    expect(rows[0]!.payload).toMatchObject({ forDate: TOMORROW, sent: 2, considered: 3 });
+    expect(rows[0]!.payload).toMatchObject({
+      forDate: TOMORROW,
+      sent: 2,
+      considered: 3,
+      deliveries: [
+        { shiftId: first.id, employeeId: anya.id, message_id: 1 },
+        { shiftId: second.id, employeeId: mark.id, message_id: 2 },
+      ],
+    });
     expect(rows[0]!.actorEmployeeId).toBeNull();
+  });
+
+  it("сохраняет подтверждённое письмо в SQLite, пока следующая отправка ждёт Telegram", async () => {
+    const db = makeTestDb();
+    const anya = linkedEmployee(db, "Аня", 111);
+    const mark = linkedEmployee(db, "Марк", 112);
+    const first = createShift(db, { date: TOMORROW, start: "07:00", end: "16:00", employeeId: anya.id });
+    const second = createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: mark.id });
+    const { bot } = testBot();
+    let signalSecond = () => {};
+    let releaseSecond = () => {};
+    const secondStarted = new Promise<void>((resolve) => { signalSecond = resolve; });
+    const allowSecond = new Promise<void>((resolve) => { releaseSecond = resolve; });
+    bot.api.config.use(async (prev, method, payload, signal) => {
+      if (method === "sendMessage" && (payload as { chat_id: number }).chat_id === 112) {
+        signalSecond();
+        await allowSecond;
+      }
+      return prev(method, payload, signal);
+    });
+
+    const tick = runReminderTick(db, bot, { date: TODAY, time: "20:05" });
+    const events = () => listRecentAudit(db, 20).filter((row) => row.type === "reminders_dispatched");
+    let firstEventId: number | undefined;
+    try {
+      await Promise.race([secondStarted, tick]);
+      expect(hasEveningReminder(db, first.id, anya.id)).toBe(true);
+      expect(hasEveningReminder(db, second.id, mark.id)).toBe(false);
+      const [entry] = events();
+      expect(entry?.payload).toMatchObject({
+        forDate: TOMORROW, sent: 1, considered: 2,
+        deliveries: [{ shiftId: first.id, employeeId: anya.id, message_id: 1 }],
+      });
+      firstEventId = entry?.id;
+    } finally {
+      releaseSecond();
+      await tick;
+    }
+
+    expect(events()).toHaveLength(1);
+    expect(events()[0]).toMatchObject({
+      id: firstEventId,
+      payload: {
+        sent: 2,
+        deliveries: [
+          { shiftId: first.id, employeeId: anya.id, message_id: 1 },
+          { shiftId: second.id, employeeId: mark.id, message_id: 2 },
+        ],
+      },
+    });
+  });
+
+  it("откатывает пометку доставки, если SQLite отклонила запись подтверждения", async () => {
+    const db = makeTestDb();
+    const anya = linkedEmployee(db, "Аня", 111);
+    const shift = createShift(db, { date: TOMORROW, start: "08:00", end: "17:00", employeeId: anya.id });
+    const { bot, sent } = testBot();
+    db.run(sql`CREATE TRIGGER reject_dispatch_audit BEFORE INSERT ON audit_log
+      WHEN NEW.type = 'reminders_dispatched' BEGIN SELECT RAISE(ABORT, 'journal test failure'); END;`);
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      await runReminderTick(db, bot, { date: TODAY, time: "20:05" });
+      expect(sent).toHaveLength(1);
+      expect(hasEveningReminder(db, shift.id, anya.id)).toBe(false);
+      expect(listRecentAudit(db, 20)).toEqual([]);
+      expect(errorLog).toHaveBeenCalledTimes(1);
+    } finally {
+      errorLog.mockRestore();
+    }
   });
 
   it("молчит, когда отправлять было нечего", async () => {
@@ -515,6 +717,39 @@ describe("галочка вида смены решает, кому напоми
       .returning()
       .all()[0]!;
   }
+
+  it.each([
+    { reminderText: "{место}", location: null },
+    { reminderText: "{место} ".repeat(21).trim(), location: "А".repeat(ENTRY_LOCATION_MAX) },
+  ])("доставляет обычное письмо, когда подстановки делают свой текст неподходящим", async ({ reminderText, location }) => {
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const db = makeTestDb();
+      const owner = linkedEmployee(db, "Аня", 111);
+      validateReminderTemplate(reminderText);
+      const morning = template(db, { name: "Утро", start: "08:00", end: "17:00", sendReminder: true, reminderText });
+      createShift(db, {
+        date: TOMORROW, start: "08:00", end: "17:00", templateId: morning.id, employeeId: owner.id, location,
+      });
+      const { bot, sent } = testBot();
+      bot.api.config.use(async (prev, method, payload, signal) => {
+        if (method === "sendMessage") {
+          const { text } = payload as { text: string };
+          if (text.trim() === "" || text.length > 4096) {
+            return { ok: false, error_code: 400, description: "Bad Request: invalid message text" };
+          }
+        }
+        return prev(method, payload, signal);
+      });
+
+      expect(await runReminderTick(db, bot, { date: TODAY, time: "20:30" })).toBe(1);
+      expect(sent).toHaveLength(1);
+      expect(sent[0]?.text).toContain("08:00–17:00");
+      expect(sent[0]?.text.length).toBeLessThanOrEqual(4096);
+    } finally {
+      errorLog.mockRestore();
+    }
+  });
 
   it("молчит про утреннюю, если у её вида смены галочка снята", async () => {
     // По эвристике утренняя напоминания заслуживает — но админ сказал «не надо».

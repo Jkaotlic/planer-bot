@@ -26,6 +26,7 @@ export function fakeTelegram(port) {
   let updId = 1;
   let msgId = 1000;
   const failFor = new Set();
+  const rateLimitNextPollFor = new Map();
   const pollsByMessage = new Map();
   const pollsById = new Map();
   const srv = http.createServer((req, res) => {
@@ -83,6 +84,12 @@ export function fakeTelegram(port) {
       }
       const call = { method, body, at: Date.now() };
       calls.push(call);
+      if (method === "sendPoll" && rateLimitNextPollFor.has(body.chat_id)) {
+        const retry_after = rateLimitNextPollFor.get(body.chat_id);
+        rateLimitNextPollFor.delete(body.chat_id);
+        res.statusCode = 429;
+        return send({ ok: false, error_code: 429, description: "Too Many Requests", parameters: { retry_after } });
+      }
       if (failFor.has(body.chat_id)) {
         res.statusCode = 403;
         return send({ ok: false, error_code: 403, description: "Forbidden: bot was blocked by the user" });
@@ -153,6 +160,7 @@ export function fakeTelegram(port) {
     },
     calls,
     failFor,
+    rateLimitNextPollFor,
     listen: () => new Promise((r) => srv.listen(port, "127.0.0.1", r)),
     close: () => {
       srv.closeAllConnections();

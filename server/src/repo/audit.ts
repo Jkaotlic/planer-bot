@@ -18,6 +18,32 @@ export function recordAudit(db: Db, type: AuditType, actorEmployeeId: number | n
   }
 }
 
+export interface ReminderDelivery {
+  shiftId: number;
+  employeeId: number;
+  message_id: number | null;
+}
+
+interface ReminderDispatchAudit {
+  forDate: string;
+  sent: number;
+  considered: number;
+  catchUp?: true;
+  deliveries: readonly ReminderDelivery[];
+}
+
+/** Ошибка должна откатить и отметку доставки в той же транзакции. */
+export function saveReminderDispatchAudit(db: Db, id: number | undefined, payload: ReminderDispatchAudit): number {
+  if (id == null) {
+    return db.insert(auditLog)
+      .values({ type: "reminders_dispatched", payload })
+      .returning({ id: auditLog.id }).get().id;
+  }
+  const row = db.update(auditLog).set({ payload }).where(eq(auditLog.id, id)).returning({ id: auditLog.id }).get();
+  if (!row) throw new Error("Строка журнала доставки исчезла во время рассылки");
+  return row.id;
+}
+
 export interface AuditQuery {
   /** Only these event types; empty or absent means every type. */
   types?: readonly string[];

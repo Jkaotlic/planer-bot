@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { createApp } from "./app";
 import { makeTestDb } from "../db/testdb";
 import { listActiveTemplates } from "../repo/templates";
+import { getTemplateRoles } from "../repo/template-roles";
 import { listRecentAudit } from "../repo/audit";
 import { createEmployee, linkTelegramAccount } from "../repo/employees";
 import { signInitData } from "../auth/telegram";
@@ -22,6 +23,24 @@ const tokenFor = async (app: ReturnType<typeof createApp>, id: number) =>
 const auth = (token: string) => ({ headers: { Authorization: `Bearer ${token}` } });
 const send = (token: string, body: unknown) => ({
   method: "PUT", headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify(body),
+});
+
+describe("изменение настроек вида смены", () => {
+  it.each(["coverage", "rotation", "roles"])("отклоняет JSON null в /%s без изменения настроек", async (setting) => {
+    const db = makeTestDb();
+    const app = createApp({ db, config });
+    const token = await tokenFor(app, 111);
+    const template = listActiveTemplates(db)[0]!;
+    const roles = getTemplateRoles(db, template.id);
+    const audit = listRecentAudit(db, 5);
+
+    const response = await app.request(`/api/admin/templates/${template.id}/${setting}`, send(token, null));
+
+    expect(response.status).toBe(400);
+    expect(listActiveTemplates(db)[0]).toEqual(template);
+    expect(getTemplateRoles(db, template.id)).toEqual(roles);
+    expect(listRecentAudit(db, 5)).toEqual(audit);
+  });
 });
 
 describe("PUT /api/admin/templates/:id/coverage", () => {
